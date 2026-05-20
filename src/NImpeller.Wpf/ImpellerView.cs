@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Threading;
 
 using NImpeller;
 using NImpeller.Wpf.Interop;
@@ -59,6 +60,9 @@ public sealed unsafe class ImpellerView : FrameworkElement
     private readonly Stopwatch _stopwatch = new();
     private TimeSpan _lastFrameTime = TimeSpan.Zero;
     private long _frameNumber;
+
+    // ---- Resize debounce ----
+    private DispatcherTimer? _resizeDebounce;
 
     // ---- Ticker subscription ----
     private ViewTicker.TickCallback? _tickCallback;
@@ -151,14 +155,58 @@ public sealed unsafe class ImpellerView : FrameworkElement
         var newPxH = ComputePixelHeight();
         if (newPxW == _pixelWidth && newPxH == _pixelHeight) return;
 
-        // Defer so we coalesce burst events (e.g. window drag-resize)
-        Dispatcher.BeginInvoke(new Action(() =>
+        // Coalesce burst events to ~one resize per frame: WPF can fire SizeChanged tens of
+        // times per second during a drag; we collapse them down to a single Recreate at the
+        // next dispatcher tick (~16 ms), which is fast enough to look "live" while still
+        // saving 30-50 redundant GPU resource rebuilds per second.
+        if (_resizeDebounce == null)
         {
-            var w = ComputePixelWidth();
-            var h = ComputePixelHeight();
-            if (w == _pixelWidth && h == _pixelHeight) return;
+            _resizeDebounce = new DispatcherTimer(
+                TimeSpan.FromMilliseconds(16),
+                DispatcherPriority.Background,
+                OnResizeDebounceTick,
+                Dispatcher);
+        }
+        _resizeDebounce.Stop();
+        _resizeDebounce.Start();
+    }
+
+    private bool _resizeInProgress;
+
+    private void OnResizeDebounceTick(object? sender, EventArgs e)
+    {
+        _resizeDebounce!.Stop();
+        if (!_isInitialized) return;
+        if (_resizeInProgress) return; // re-entrancy guard (extreme edge cases)
+
+        var w = ComputePixelWidth();
+        var h = ComputePixelHeight();
+        if (w == _pixelWidth && h == _pixelHeight) return;
+        if (w < 16 || h < 16) return; // skip degenerate sizes
+
+        _resizeInProgress = true;
+        try
+        {
             RecreateForSize(w, h);
-        }));
+        }
+        catch (Exception ex)
+        {
+            TraceLog.Log($"[ImpellerView] RecreateForSize threw: {ex.GetType().Name}: {ex.Message}");
+        }
+        finally
+        {
+            _resizeInProgress = false;
+
+            // If another SizeChanged arrived while we were recreating, the timer was
+            // restarted; otherwise check once more in case the window kept growing.
+            var w2 = ComputePixelWidth();
+            var h2 = ComputePixelHeight();
+            if ((w2 != _pixelWidth || h2 != _pixelHeight) && w2 >= 16 && h2 >= 16)
+            {
+                _resizeDebounce!.Stop();
+                _resizeDebounce.Start();
+            }
+        }
     }
 
     private uint ComputePixelWidth()
@@ -285,7 +333,10 @@ public sealed unsafe class ImpellerView : FrameworkElement
         try { _host.Vk.DeviceWaitIdle(_host.VkDevice); }
         catch (Exception ex) { TraceLog.Log($"[ImpellerView] DeviceWaitIdle on resize threw: {ex.Message}"); }
 
-        // Tear down only the swapchain + surface + shared image; keep the host.
+        // Tear down only the swapchain + shared image; keep the host.
+        // NOTE: Impeller takes ownership of the VkSurfaceKHR passed to VulkanSwapchainCreateNew
+        // and destroys it when the swapchain is disposed. Calling vkDestroySurfaceKHR ourselves
+        // would be a double-free and corrupts the native heap (0xc0000374).
         if (_swapchainHandle != 0)
         {
             VkTrampolines.UnregisterSwapchainBlit(_swapchainHandle);
@@ -295,11 +346,7 @@ public sealed unsafe class ImpellerView : FrameworkElement
         _impellerSwapchain = null;
         _blitContext?.Dispose();
         _blitContext = null;
-        if (_vkSurface.Handle != 0)
-        {
-            _host.KhrSurfaceExt!.DestroySurface(_host.VkInstance, _vkSurface, null);
-            _vkSurface = default;
-        }
+        _vkSurface = default; // Impeller already destroyed the underlying VkSurfaceKHR
         _sharedVkImage?.Dispose();
         _sharedVkImage = null;
 
@@ -320,6 +367,7 @@ public sealed unsafe class ImpellerView : FrameworkElement
 
     private void Teardown()
     {
+        _resizeDebounce?.Stop();
         UnregisterFromTicker();
         if (!_isInitialized) return;
 
@@ -337,11 +385,8 @@ public sealed unsafe class ImpellerView : FrameworkElement
         _impellerSwapchain?.Dispose();
         _impellerSwapchain = null;
 
-        if (_vkSurface.Handle != 0 && _host != null)
-        {
-            _host.KhrSurfaceExt!.DestroySurface(_host.VkInstance, _vkSurface, null);
-            _vkSurface = default;
-        }
+        // Impeller's swapchain dispose owns the VkSurfaceKHR — do not destroy it ourselves.
+        _vkSurface = default;
 
         _blitContext?.Dispose();
         _blitContext = null;
