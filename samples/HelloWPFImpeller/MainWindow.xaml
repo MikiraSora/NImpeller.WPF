@@ -1,0 +1,15 @@
+<Window x:Class="HelloWPFImpeller.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:interop="clr-namespace:System.Windows.Interop;assembly=PresentationCore"
+        Title="HelloWPFImpeller"
+        Width="1280" Height="720"
+        Background="#202020">
+    <Grid>
+        <Image Stretch="Fill" RenderOptions.BitmapScalingMode="HighQuality">
+            <Image.Source>
+                <interop:D3DImage x:Name="D3DImage" />
+            </Image.Source>
+        </Image>
+    </Grid>
+</Window>

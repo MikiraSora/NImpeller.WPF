@@ -7,3 +7,6 @@ riderModule.iml
 .nuke
 external/impeller_sdk
 .DS_Store
+
+.claude
+.vs
