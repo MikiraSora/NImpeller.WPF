@@ -70,19 +70,6 @@ it is drawn by Impeller's Vulkan renderer.
 
 ---
 
-## Requirements
-
-| | |
-| --- | --- |
-| OS | Windows 10 1903+ / Windows 11 |
-| .NET | .NET 8.0 |
-| Architecture | **x64** (D3D9Ex + Vulkan loader integration is x64-only here) |
-| GPU | Any GPU with Vulkan 1.1+ and `VK_KHR_external_memory_win32` support — practically every Intel / AMD / NVIDIA driver from the last 5 years |
-| Runtime | `vulkan-1.dll` (LunarG runtime or vendor driver — installed by every modern Vulkan driver) |
-| Native | `impeller.dll` (deployed by [`Impeller.targets`](../../samples/Sandbox/Impeller.targets) — see "Installation" below) |
-
----
-
 ## Installation
 
 NImpeller.Wpf is not yet published to NuGet. Reference it as a project from this repository:
