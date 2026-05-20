@@ -2065,10 +2065,10 @@ internal sealed class DonutChartScene : IGalleryScene
             {
                 var (rr, gg, bb) = SceneHelpers.HsvToRgb(i / (float)_data.Length, 0.7f, 1.0f);
                 sw.SetColor(new ImpellerColor { Alpha = 1, Red = rr, Green = gg, Blue = bb });
-                b.DrawOval(new ImpellerRect((int)legendX, (int)(legendY + i * 42 * e.DpiScaleY), (int)(20 * e.DpiScaleX), (int)(20 * e.DpiScaleY)), sw);
+                b.DrawOval(new ImpellerRect((int)legendX, (int)(legendY + i * 42 * e.DpiScaleY), (int)(20 * e.DpiScaleY), (int)(20 * e.DpiScaleY)), sw);
                 TextBasicsScene.DrawSimpleText(b, e.Typography,
                     $"{_data[i].label}  —  {_data[i].value:0}h",
-                    16 * e.DpiScaleX, legendX + 32 * e.DpiScaleX, legendY + i * 42 * e.DpiScaleY, e.PixelWidth,
+                    16 * e.DpiScaleY, legendX + 32 * e.DpiScaleY, legendY + i * 42 * e.DpiScaleY, e.PixelWidth,
                     ImpellerColor.FromRgb(0xE8, 0xE8, 0xE8));
             }
         }
@@ -2165,7 +2165,7 @@ internal sealed class GaugeScene : IGalleryScene
         {
             int pct = (int)(value * 100);
             TextBasicsScene.DrawSimpleText(b, e.Typography, $"{pct}%",
-                40 * e.DpiScaleY, cx - 100, cy + 30 * e.DpiScaleY, 200,
+                40 * e.DpiScaleX, cx - 100, cy + 30 * e.DpiScaleY, 200,
                 ImpellerColor.FromRgb(0xF0, 0xF0, 0xF0),
                 weight: ImpellerFontWeight.kImpellerFontWeight700,
                 align: ImpellerTextAlignment.kImpellerTextAlignmentCenter);
