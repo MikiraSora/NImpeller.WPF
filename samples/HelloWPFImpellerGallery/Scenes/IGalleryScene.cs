@@ -1,3 +1,5 @@
+using System.Windows;
+
 using NImpeller.Wpf;
 
 namespace HelloWPFImpellerGallery.Scenes;
@@ -20,6 +22,15 @@ public interface IGalleryScene
     /// <c>e.FrameNumber</c> for animation.
     /// </summary>
     void Render(ImpellerRenderEventArgs e);
+}
+
+/// <summary>
+/// Optional capability: a scene that owns its own WPF content instead of using the
+/// gallery-level ImpellerView render surface.
+/// </summary>
+public interface IContentGalleryScene : IGalleryScene
+{
+    FrameworkElement CreateContent();
 }
 
 /// <summary>

@@ -95,6 +95,10 @@
         <!-- RIGHT: Impeller render surface + overlay controls -->
         <Grid Grid.Column="1">
             <imp:ImpellerView x:Name="GalleryView" Render="GalleryView_OnRender"/>
+            <ContentControl x:Name="SceneContentHost"
+                            HorizontalContentAlignment="Stretch"
+                            VerticalContentAlignment="Stretch"
+                            Visibility="Collapsed"/>
 
             <!-- Top-right overlay: count controls for IConfigurableScene -->
             <Border x:Name="CountControls"

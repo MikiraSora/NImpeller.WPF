@@ -16,6 +16,7 @@ public partial class MainWindow : Window
     private const string TitleBase = "HelloWPFImpellerGallery";
 
     private IGalleryScene? _currentScene;
+    private IContentGalleryScene? _currentContentScene;
 
     // FPS measurement (drives the title bar)
     // Strategy: count frames inside OnRender, recompute every >=500ms of wall-clock
@@ -59,6 +60,7 @@ public partial class MainWindow : Window
     private void SceneList_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         _currentScene = SceneList.SelectedItem as IGalleryScene;
+        UpdateSceneContent();
         UpdateCountControlsVisibility();
 
         // Reset FPS measurement so a scene switch doesn't carry over old throughput.
@@ -70,6 +72,12 @@ public partial class MainWindow : Window
 
     private void UpdateCountControlsVisibility()
     {
+        if (_currentScene is IContentGalleryScene)
+        {
+            CountControls.Visibility = Visibility.Collapsed;
+            return;
+        }
+
         if (_currentScene is IConfigurableScene cs)
         {
             if (!_defaultCounts.ContainsKey(cs))
@@ -82,6 +90,33 @@ public partial class MainWindow : Window
         {
             CountControls.Visibility = Visibility.Collapsed;
         }
+    }
+
+    private void UpdateSceneContent()
+    {
+        if (_currentScene is IContentGalleryScene contentScene)
+        {
+            if (!ReferenceEquals(_currentContentScene, contentScene))
+            {
+                GalleryView.Stop();
+                SceneContentHost.Content = contentScene.CreateContent();
+                _currentContentScene = contentScene;
+            }
+
+            GalleryView.Visibility = Visibility.Collapsed;
+            SceneContentHost.Visibility = Visibility.Visible;
+            return;
+        }
+
+        if (_currentContentScene != null)
+        {
+            SceneContentHost.Content = null;
+            _currentContentScene = null;
+        }
+
+        SceneContentHost.Visibility = Visibility.Collapsed;
+        GalleryView.Visibility = Visibility.Visible;
+        GalleryView.Start();
     }
 
     private void RefreshCountLabel(IConfigurableScene cs)
