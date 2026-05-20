@@ -15,6 +15,9 @@ public partial class MainWindow : Window
 
     private IGalleryScene? _currentScene;
     private readonly DispatcherTimer _titleTimer;
+    private int _frameCount;
+    private double _fps;
+    private DateTime _lastFpsSample = DateTime.UtcNow;
 
     public MainWindow()
     {
@@ -46,18 +49,28 @@ public partial class MainWindow : Window
         var scene = _currentScene;
         if (scene == null)
         {
-            // No scene selected — clear to a default backdrop.
             using var paint = NImpeller.ImpellerPaint.New();
             paint?.SetColor(NImpeller.ImpellerColor.FromRgb(0x14, 0x18, 0x1D));
             if (paint != null) e.Builder.DrawPaint(paint);
-            return;
         }
-        scene.Render(e);
+        else
+        {
+            scene.Render(e);
+        }
+        _frameCount++;
     }
 
     private void OnTitleTick(object? sender, EventArgs e)
     {
+        var now = DateTime.UtcNow;
+        var elapsed = (now - _lastFpsSample).TotalSeconds;
+        if (elapsed > 0)
+        {
+            _fps = _frameCount / elapsed;
+            _frameCount = 0;
+            _lastFpsSample = now;
+        }
         var name = _currentScene?.Name ?? "—";
-        Title = $"{TitleBase}  —  {name}  —  {GalleryView.Fps,5:0.0} fps";
+        Title = $"{TitleBase}  —  {name}  —  {_fps,5:0.0} fps";
     }
 }

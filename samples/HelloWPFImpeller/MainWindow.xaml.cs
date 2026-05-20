@@ -13,6 +13,9 @@ public partial class MainWindow : Window
     private const string TitleBase = "HelloWPFImpeller — 4× ImpellerView";
 
     private readonly DispatcherTimer _titleTimer;
+    private readonly int[] _frameCount = new int[4];
+    private readonly double[] _fps = new double[4];
+    private DateTime _lastFpsSample = DateTime.UtcNow;
 
     public MainWindow()
     {
@@ -31,17 +34,28 @@ public partial class MainWindow : Window
 
     private void OnTitleTick(object? sender, EventArgs e)
     {
-        Title = $"{TitleBase}  —  V1:{View1.Fps,5:0.0}  V2:{View2.Fps,5:0.0}  V3:{View3.Fps,5:0.0}  V4:{View4.Fps,5:0.0} fps";
+        var now = DateTime.UtcNow;
+        var elapsed = (now - _lastFpsSample).TotalSeconds;
+        if (elapsed > 0)
+        {
+            for (int i = 0; i < 4; i++)
+            {
+                _fps[i] = _frameCount[i] / elapsed;
+                _frameCount[i] = 0;
+            }
+            _lastFpsSample = now;
+        }
+        Title = $"{TitleBase}  —  V1:{_fps[0],5:0.0}  V2:{_fps[1],5:0.0}  V3:{_fps[2],5:0.0}  V4:{_fps[3],5:0.0} fps";
     }
 
     // Four render handlers — all forward to the shared HelloDemoScene with a different
     // time offset so each view is visually distinguishable.
-    private void View1_OnRender(object? s, ImpellerRenderEventArgs e) => RenderSceneVariant(e, timeOffset: 0.0f);
-    private void View2_OnRender(object? s, ImpellerRenderEventArgs e) => RenderSceneVariant(e, timeOffset: 0.7f);
-    private void View3_OnRender(object? s, ImpellerRenderEventArgs e) => RenderSceneVariant(e, timeOffset: 1.4f);
-    private void View4_OnRender(object? s, ImpellerRenderEventArgs e) => RenderSceneVariant(e, timeOffset: 2.1f);
+    private void View1_OnRender(object? s, ImpellerRenderEventArgs e) => RenderSceneVariant(e, viewIndex: 0, timeOffset: 0.0f);
+    private void View2_OnRender(object? s, ImpellerRenderEventArgs e) => RenderSceneVariant(e, viewIndex: 1, timeOffset: 0.7f);
+    private void View3_OnRender(object? s, ImpellerRenderEventArgs e) => RenderSceneVariant(e, viewIndex: 2, timeOffset: 1.4f);
+    private void View4_OnRender(object? s, ImpellerRenderEventArgs e) => RenderSceneVariant(e, viewIndex: 3, timeOffset: 2.1f);
 
-    private void RenderSceneVariant(ImpellerRenderEventArgs e, float timeOffset)
+    private void RenderSceneVariant(ImpellerRenderEventArgs e, int viewIndex, float timeOffset)
     {
         var t = (float)e.TotalTime.TotalSeconds + timeOffset;
         HelloDemoScene.Render(
@@ -52,5 +66,6 @@ public partial class MainWindow : Window
             height: e.PixelHeight,
             frameNumber: e.FrameNumber,
             dpiScale: e.DpiScale);
+        _frameCount[viewIndex]++;
     }
 }

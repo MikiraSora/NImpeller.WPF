@@ -60,11 +60,6 @@ public sealed unsafe class ImpellerView : FrameworkElement
     private TimeSpan _lastFrameTime = TimeSpan.Zero;
     private long _frameNumber;
 
-    // ---- FPS tracking ----
-    private int _fpsFrameCount;
-    private TimeSpan _fpsLastSample = TimeSpan.Zero;
-    private double _fps;
-
     // ---- Ticker subscription ----
     private ViewTicker.TickCallback? _tickCallback;
     private bool _frameReadyFired;
@@ -75,12 +70,6 @@ public sealed unsafe class ImpellerView : FrameworkElement
     public double DpiScaleX => _dpiScaleX;
     public double DpiScaleY => _dpiScaleY;
     public long FrameNumber => _frameNumber;
-
-    /// <summary>Average frames per second over the last ~1 second window. Updates after each window closes.</summary>
-    public double Fps => _fps;
-
-    /// <summary>Raised on the UI thread roughly once per second after <see cref="Fps"/> has been recomputed.</summary>
-    public event EventHandler? FpsUpdated;
 
     public ImpellerView()
     {
@@ -448,21 +437,6 @@ public sealed unsafe class ImpellerView : FrameworkElement
         {
             _frameReadyFired = true;
             Ready?.Invoke(this, EventArgs.Empty);
-        }
-
-        UpdateFps(totalTime);
-    }
-
-    private void UpdateFps(TimeSpan now)
-    {
-        _fpsFrameCount++;
-        var elapsed = now - _fpsLastSample;
-        if (elapsed.TotalSeconds >= 1.0)
-        {
-            _fps = _fpsFrameCount / elapsed.TotalSeconds;
-            _fpsFrameCount = 0;
-            _fpsLastSample = now;
-            FpsUpdated?.Invoke(this, EventArgs.Empty);
         }
     }
 }
