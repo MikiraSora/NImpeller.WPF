@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Threading;
 
 using NImpeller;
+using NImpeller.Wpf;
 
 using Silk.NET.Vulkan;
 using Silk.NET.Vulkan.Extensions.KHR;
@@ -31,6 +32,15 @@ internal sealed unsafe class ImpellerSharedHost
     private static readonly object Gate = new();
     private static ImpellerSharedHost? _instance;
     private static int _refCount;
+    /// <summary>
+    /// Guard so the <c>AppDomain.ProcessExit</c> handler is only attached once per
+    /// process. Without this, a <c>Shutdown()</c> followed by a new
+    /// <c>AcquireAndStart</c> would create a fresh instance and attach a second
+    /// handler — at process exit <c>Shutdown</c> would then run twice
+    /// (idempotent thanks to <c>DisposeAll</c>'s guard, but still wasteful and
+    /// surprising).
+    /// </summary>
+    private static bool _processExitHooked;
 
     public static ImpellerSharedHost AcquireAndStart(ImpellerViewSettings settings)
     {
@@ -75,11 +85,23 @@ internal sealed unsafe class ImpellerSharedHost
     public ImpellerTypographyContext? Typography { get; private set; }
     public KhrSurface? KhrSurfaceExt { get; private set; }
     public KhrWin32Surface? KhrWin32SurfaceExt { get; private set; }
+    /// <summary>
+    /// Device-level extension used by <see cref="SharedVulkanImage"/> to query the
+    /// memory type bits compatible with an imported D3D11 KMT handle
+    /// (<c>vkGetMemoryWin32HandlePropertiesKHR</c>). Loaded once at host init.
+    /// </summary>
+    public KhrExternalMemoryWin32? KhrExternalMemoryWin32Ext { get; private set; }
     /// <summary>HINSTANCE of the host process (used for creating per-view hidden HWNDs).</summary>
     public IntPtr HiddenHInstance { get; private set; }
 
-    /// <summary>Shared mutex used to serialize <c>vkQueueSubmit</c> across all BlitContexts.</summary>
-    public object QueueSubmitLock { get; } = new();
+    /// <summary>
+    /// Process-shared mutex used to serialize <c>vkQueueSubmit</c> across every
+    /// <see cref="BlitContext"/> (one per ImpellerView) since all of them post
+    /// to the same Impeller <see cref="Queue"/>. Multi-view present paths must
+    /// take this lock; allocating a per-view lock would let concurrent submits
+    /// from different views race on the shared queue.
+    /// </summary>
+    public object SharedQueueLock { get; } = new();
 
     private bool _disposed;
 
@@ -110,9 +132,23 @@ internal sealed unsafe class ImpellerSharedHost
         }
 
         // 3) Create the single ImpellerContext (this is the heavyweight, ~1-2 s) step
+        VkTrampolines.PendingInitializationError = null;
         var ctx = ImpellerContext.CreateVulkanNew(
             VkProcInterceptor.GetProcAddress,
             enableValidation: settings.EnableValidation);
+
+        // The LUID-reorder trampoline may have stashed a fatal mismatch — re-throw on
+        // the managed side now, with the original CreateVulkanNew failure (if any)
+        // as the inner exception.
+        if (VkTrampolines.PendingInitializationError is { } stashed)
+        {
+            VkTrampolines.PendingInitializationError = null;
+            ctx?.Dispose();
+            throw new ImpellerRenderErrorException(
+                "ImpellerSharedHost initialization aborted: " + stashed.Message,
+                stashed);
+        }
+
         Context = ctx ?? throw new InvalidOperationException("ImpellerContext.CreateVulkanNew returned null.");
 
         var info = Context.GetVulkanInfo()
@@ -134,6 +170,10 @@ internal sealed unsafe class ImpellerSharedHost
         if (!Vk.TryGetInstanceExtension<KhrSurface>(VkInstance, out var khrSurface))
             throw new InvalidOperationException("VK_KHR_surface not available on Impeller's VkInstance.");
         KhrSurfaceExt = khrSurface;
+        if (!Vk.TryGetDeviceExtension<KhrExternalMemoryWin32>(VkInstance, VkDevice, out var khrExtMemWin32))
+            throw new InvalidOperationException(
+                "VK_KHR_external_memory_win32 not available on Impeller's VkDevice — shared-texture import cannot work.");
+        KhrExternalMemoryWin32Ext = khrExtMemWin32;
 
         TraceLog.Log("[ImpellerSharedHost] Vulkan context ready:");
         TraceLog.Log($"  VkInstance       = 0x{(long)info.Vk_instance:X16}");
@@ -154,8 +194,14 @@ internal sealed unsafe class ImpellerSharedHost
         //    same client-area size, which doesn't work when views have different sizes.
         HiddenHInstance = GetModuleHandleW(null);
 
-        // 7) Ensure clean shutdown on process exit (idempotent w.r.t. explicit Shutdown())
-        AppDomain.CurrentDomain.ProcessExit += (_, _) => Shutdown();
+        // 7) Ensure clean shutdown on process exit (idempotent w.r.t. explicit Shutdown()).
+        //    Only register the handler once per process — re-registering after a
+        //    Shutdown+Acquire cycle would cause Shutdown to fire multiple times.
+        if (!_processExitHooked)
+        {
+            _processExitHooked = true;
+            AppDomain.CurrentDomain.ProcessExit += (_, _) => Shutdown();
+        }
 
         // 8) Cache a snapshot of GPU + Vulkan + Impeller info for diagnostic UIs.
         CachedGpuInfo = QueryGpuInfo();
@@ -270,6 +316,8 @@ internal sealed unsafe class ImpellerSharedHost
         KhrWin32SurfaceExt = null;
         KhrSurfaceExt?.Dispose();
         KhrSurfaceExt = null;
+        KhrExternalMemoryWin32Ext?.Dispose();
+        KhrExternalMemoryWin32Ext = null;
 
         Context?.Dispose();
         Context = null!;

@@ -85,21 +85,32 @@ internal sealed class HiddenVulkanWindow : IDisposable
         {
             if (!s_classRegistered)
             {
-                var wc = new WNDCLASSEXW
+                // Allocate the class-name string just for the duration of RegisterClassExW;
+                // Windows copies it into its internal class table, so we can free immediately
+                // after registration and avoid a permanent process-level leak.
+                var classNamePtr = Marshal.StringToHGlobalUni(ClassName);
+                try
                 {
-                    cbSize = (uint)Marshal.SizeOf<WNDCLASSEXW>(),
-                    style = CS_OWNDC,
-                    lpfnWndProc = Marshal.GetFunctionPointerForDelegate(s_wndProc),
-                    hInstance = _hinstance,
-                    lpszClassName = Marshal.StringToHGlobalUni(ClassName),
-                };
-                if (RegisterClassExW(ref wc) == 0)
-                {
-                    int err = Marshal.GetLastWin32Error();
-                    if (err != 0x582 /* ERROR_CLASS_ALREADY_EXISTS */)
-                        throw new InvalidOperationException($"RegisterClassExW failed (err={err})");
+                    var wc = new WNDCLASSEXW
+                    {
+                        cbSize = (uint)Marshal.SizeOf<WNDCLASSEXW>(),
+                        style = CS_OWNDC,
+                        lpfnWndProc = Marshal.GetFunctionPointerForDelegate(s_wndProc),
+                        hInstance = _hinstance,
+                        lpszClassName = classNamePtr,
+                    };
+                    if (RegisterClassExW(ref wc) == 0)
+                    {
+                        int err = Marshal.GetLastWin32Error();
+                        if (err != 0x582 /* ERROR_CLASS_ALREADY_EXISTS */)
+                            throw new InvalidOperationException($"RegisterClassExW failed (err={err})");
+                    }
+                    s_classRegistered = true;
                 }
-                s_classRegistered = true;
+                finally
+                {
+                    Marshal.FreeHGlobal(classNamePtr);
+                }
             }
         }
 

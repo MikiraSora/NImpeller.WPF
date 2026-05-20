@@ -71,23 +71,22 @@ internal sealed class SystemInfoScene : IGalleryScene
         var b = e.Builder;
         SceneHelpers.ClearBg(b, 0x18, 0x1C, 0x24);
         if (e.Typography == null) return;
-        var s = e.DpiScale;
 
         var info = ImpellerSystemInfo.GpuInfo;
 
-        float x = 40 * s;
-        float y = 30 * s;
-        float lineH = 24 * s;
+        float x = 40 * e.DpiScaleX;
+        float y = 30 * e.DpiScaleY;
+        float lineH = 24 * e.DpiScaleY;
 
-        TextBasicsScene.DrawSimpleText(b, e.Typography, "Impeller × Vulkan × GPU", 30 * s,
+        TextBasicsScene.DrawSimpleText(b, e.Typography, "Impeller × Vulkan × GPU", 30 * e.DpiScaleX,
             x, y, e.PixelWidth, ImpellerColor.FromRgb(0xFF, 0xFF, 0xFF),
             weight: ImpellerFontWeight.kImpellerFontWeight700);
-        y += 50 * s;
+        y += 50 * e.DpiScaleY;
 
         if (info == null)
         {
             TextBasicsScene.DrawSimpleText(b, e.Typography, "ImpellerSystemInfo.GpuInfo is null (host not initialized yet).",
-                14 * s, x, y, e.PixelWidth - (int)x,
+                14 * e.DpiScaleX, x, y, e.PixelWidth - (int)x,
                 ImpellerColor.FromRgb(0xE8, 0x70, 0x70));
             return;
         }
@@ -98,17 +97,17 @@ internal sealed class SystemInfoScene : IGalleryScene
 
         void DrawHeader(string text)
         {
-            TextBasicsScene.DrawSimpleText(b, e.Typography!, text, 16 * s,
+            TextBasicsScene.DrawSimpleText(b, e.Typography!, text, 16 * e.DpiScaleX,
                 x, y, e.PixelWidth - (int)x, groupHeader,
                 weight: ImpellerFontWeight.kImpellerFontWeight700);
-            y += lineH + 4 * s;
+            y += lineH + 4 * e.DpiScaleY;
         }
         void DrawRow(string label, string value)
         {
-            TextBasicsScene.DrawSimpleText(b, e.Typography!, label, 14 * s,
-                x + 18 * s, y, 200, labelColor);
-            TextBasicsScene.DrawSimpleText(b, e.Typography!, value, 14 * s,
-                x + 230 * s, y, e.PixelWidth - 280, valueColor,
+            TextBasicsScene.DrawSimpleText(b, e.Typography!, label, 14 * e.DpiScaleX,
+                x + 18 * e.DpiScaleX, y, 200, labelColor);
+            TextBasicsScene.DrawSimpleText(b, e.Typography!, value, 14 * e.DpiScaleX,
+                x + 230 * e.DpiScaleX, y, e.PixelWidth - 280, valueColor,
                 weight: ImpellerFontWeight.kImpellerFontWeight500);
             y += lineH;
         }
@@ -117,7 +116,7 @@ internal sealed class SystemInfoScene : IGalleryScene
         DrawHeader("Impeller");
         DrawRow("API version",     $"{info.ImpellerApiVersion}  (raw 0x{info.ImpellerApiVersionRaw:X8})");
         DrawRow("Backend",          "Vulkan");
-        y += 8 * s;
+        y += 8 * e.DpiScaleY;
 
         // === Vulkan ===
         DrawHeader("Vulkan");
@@ -127,7 +126,7 @@ internal sealed class SystemInfoScene : IGalleryScene
         DrawRow("Physical device",  $"0x{(long)info.VkPhysicalDevice:X16}");
         DrawRow("Logical device",   $"0x{(long)info.VkDevice:X16}");
         DrawRow("Queue",            $"0x{(long)info.VkQueue:X16}  family {info.QueueFamilyIndex}  index {info.QueueIndex}");
-        y += 8 * s;
+        y += 8 * e.DpiScaleY;
 
         // === GPU ===
         DrawHeader("GPU");
@@ -140,12 +139,12 @@ internal sealed class SystemInfoScene : IGalleryScene
         DrawRow("HostVisible mem",  FormatBytes(info.HostVisibleMemoryBytes));
         DrawRow("Max 2D image",     $"{info.MaxImageDimension2D} × {info.MaxImageDimension2D}");
         DrawRow("Max framebuffer",  $"{info.MaxFramebufferWidth} × {info.MaxFramebufferHeight}");
-        y += 8 * s;
+        y += 8 * e.DpiScaleY;
 
         // === Current ImpellerView ===
         DrawHeader("Current ImpellerView");
         DrawRow("Pixel size",       $"{e.PixelWidth} × {e.PixelHeight}");
-        DrawRow("DPI scale",        $"{e.DpiScale:0.###}×");
+        DrawRow("DPI scale",        $"X:{e.DpiScaleX:0.###}× Y:{e.DpiScaleY:0.###}x");
         DrawRow("Frame number",     e.FrameNumber.ToString("N0"));
         DrawRow("Frame delta",      $"{e.DeltaTime.TotalMilliseconds:0.00} ms");
         DrawRow("Total time",       $"{e.TotalTime.TotalSeconds:0.0} s");
@@ -174,7 +173,6 @@ internal sealed class BasicShapesScene : IGalleryScene
         var b = e.Builder;
         ClearBackground(b, 0x1A, 0x1D, 0x22);
 
-        var s = e.DpiScale;
         using var paintFill = ImpellerPaint.New()!;
 
         // Rectangle
@@ -199,7 +197,7 @@ internal sealed class BasicShapesScene : IGalleryScene
         using var paintLine = ImpellerPaint.New()!;
         paintLine.SetColor(ImpellerColor.FromRgb(0xFF, 0xFF, 0xFF));
         paintLine.SetDrawStyle(ImpellerDrawStyle.kImpellerDrawStyleStroke);
-        paintLine.SetStrokeWidth(4f * s);
+        paintLine.SetStrokeWidth(4f * e.DpiScaleX);
         b.DrawLine(new ImpellerPoint { X = 40, Y = 240 }, new ImpellerPoint { X = 720, Y = 380 }, paintLine);
 
         // Rounded rect difference (outer minus inner) — like a ring shape
@@ -229,7 +227,6 @@ internal sealed class StrokeAndFillScene : IGalleryScene
     {
         var b = e.Builder;
         ClearBg(b);
-        var s = e.DpiScale;
 
         using var fill = ImpellerPaint.New()!;
         fill.SetColor(ImpellerColor.FromRgb(0x70, 0xA8, 0xE8));
@@ -239,13 +236,13 @@ internal sealed class StrokeAndFillScene : IGalleryScene
         using var stroke = ImpellerPaint.New()!;
         stroke.SetColor(ImpellerColor.FromRgb(0xE8, 0xA8, 0x70));
         stroke.SetDrawStyle(ImpellerDrawStyle.kImpellerDrawStyleStroke);
-        stroke.SetStrokeWidth(6f * s);
+        stroke.SetStrokeWidth(6f * e.DpiScaleX);
         b.DrawRect(new ImpellerRect(260, 40, 180, 180), stroke);
 
         using var both = ImpellerPaint.New()!;
         both.SetColor(ImpellerColor.FromRgb(0xE8, 0xE8, 0x70));
         both.SetDrawStyle(ImpellerDrawStyle.kImpellerDrawStyleStrokeAndFill);
-        both.SetStrokeWidth(10f * s);
+        both.SetStrokeWidth(10f * e.DpiScaleX);
         b.DrawRect(new ImpellerRect(480, 40, 180, 180), both);
 
         // Increasing stroke widths
@@ -254,7 +251,7 @@ internal sealed class StrokeAndFillScene : IGalleryScene
         label.SetDrawStyle(ImpellerDrawStyle.kImpellerDrawStyleStroke);
         for (int i = 0; i < 8; i++)
         {
-            label.SetStrokeWidth((1 + i * 2) * s);
+            label.SetStrokeWidth((1 + i * 2) * e.DpiScaleX);
             int y = 280 + i * 38;
             b.DrawLine(new ImpellerPoint { X = 40, Y = y }, new ImpellerPoint { X = 700, Y = y }, label);
         }
@@ -280,7 +277,6 @@ internal sealed class StrokeStylesScene : IGalleryScene
     {
         var b = e.Builder;
         ClearBg(b);
-        var s = e.DpiScale;
 
         var caps = new[] { ImpellerStrokeCap.kImpellerStrokeCapButt, ImpellerStrokeCap.kImpellerStrokeCapRound, ImpellerStrokeCap.kImpellerStrokeCapSquare };
         var capNames = new[] { "Butt", "Round", "Square" };
@@ -288,7 +284,7 @@ internal sealed class StrokeStylesScene : IGalleryScene
         using var p = ImpellerPaint.New()!;
         p.SetColor(ImpellerColor.FromRgb(0xE8, 0xC8, 0x70));
         p.SetDrawStyle(ImpellerDrawStyle.kImpellerDrawStyleStroke);
-        p.SetStrokeWidth(28f * s);
+        p.SetStrokeWidth(28f * e.DpiScaleX);
 
         for (int i = 0; i < caps.Length; i++)
         {
@@ -358,7 +354,7 @@ internal sealed class PathsScene : IGalleryScene
             using var p = ImpellerPaint.New()!;
             p.SetColor(ImpellerColor.FromRgb(0x70, 0xE8, 0xA8));
             p.SetDrawStyle(ImpellerDrawStyle.kImpellerDrawStyleStroke);
-            p.SetStrokeWidth(6f * e.DpiScale);
+            p.SetStrokeWidth(6f * e.DpiScaleX);
             b.DrawPath(path, p);
         }
 
@@ -422,7 +418,6 @@ internal sealed class DashedLinesScene : IGalleryScene
     {
         var b = e.Builder;
         ClearBg(b);
-        var s = e.DpiScale;
 
         using var p = ImpellerPaint.New()!;
         p.SetColor(ImpellerColor.FromRgb(0xE8, 0xE8, 0xE8));
@@ -441,13 +436,13 @@ internal sealed class DashedLinesScene : IGalleryScene
 
         for (int i = 0; i < patterns.Length; i++)
         {
-            p.SetStrokeWidth(patterns[i].width * s);
+            p.SetStrokeWidth(patterns[i].width * e.DpiScaleX);
             int y = 80 + i * 70;
             b.DrawDashedLine(
                 new ImpellerPoint { X = 80, Y = y },
                 new ImpellerPoint { X = 720, Y = y },
-                patterns[i].onLen * s,
-                patterns[i].offLen * s,
+                patterns[i].onLen * e.DpiScaleX,
+                patterns[i].offLen * e.DpiScaleX,
                 p);
         }
     }
@@ -473,7 +468,6 @@ internal sealed class TransformsScene : IGalleryScene
         var b = e.Builder;
         ClearBg(b);
         float t = (float)e.TotalTime.TotalSeconds;
-        var s = e.DpiScale;
 
         using var p = ImpellerPaint.New()!;
 
@@ -646,7 +640,7 @@ internal sealed class ShadowsScene : IGalleryScene
             pb.AddRoundedRect(new ImpellerRect((int)x, (int)y, 140, 200), radii);
             using var path = pb.TakePathNew(ImpellerFillType.kImpellerFillTypeNonZero)!;
 
-            b.DrawShadow(path, shadowColor, elevations[i], 0, (float)e.DpiScale);
+            b.DrawShadow(path, shadowColor, elevations[i], 0, (float)e.DpiScaleX);
             b.DrawPath(path, fill);
         }
     }
@@ -673,21 +667,20 @@ internal sealed class TextBasicsScene : IGalleryScene
         ClearBg(b);
         if (e.Typography == null) return;
 
-        var s = e.DpiScale;
         var sizes = new (float size, string label)[]
         {
-            (12 * s, "12pt"), (16 * s, "16pt"), (22 * s, "22pt"),
-            (32 * s, "32pt"), (48 * s, "48pt"),
+            (12 * e.DpiScaleX, "12pt"), (16 * e.DpiScaleX, "16pt"), (22 * e.DpiScaleX, "22pt"),
+            (32 * e.DpiScaleX, "32pt"), (48 * e.DpiScaleX, "48pt"),
         };
-        float y = 40 * s;
+        float y = 40 * e.DpiScaleY;
         foreach (var (size, label) in sizes)
         {
-            DrawSimpleText(b, e.Typography, $"{label} The quick brown fox", size, x: 40 * s, y, e.PixelWidth,
+            DrawSimpleText(b, e.Typography, $"{label} The quick brown fox", size, x: 40 * e.DpiScaleX, y, e.PixelWidth,
                 ImpellerColor.FromRgb(255, 255, 255), ImpellerFontWeight.kImpellerFontWeight400);
-            y += size + 12 * s;
+            y += size + 12 * e.DpiScaleY;
         }
 
-        y += 24 * s;
+        y += 24 * e.DpiScaleY;
         var weights = new (ImpellerFontWeight w, string label)[]
         {
             (ImpellerFontWeight.kImpellerFontWeight300, "Light"),
@@ -698,9 +691,9 @@ internal sealed class TextBasicsScene : IGalleryScene
         };
         foreach (var (w, label) in weights)
         {
-            DrawSimpleText(b, e.Typography, $"{label} weight", 24 * s, x: 40 * s, y, e.PixelWidth,
+            DrawSimpleText(b, e.Typography, $"{label} weight", 24 * e.DpiScaleX, x: 40 * e.DpiScaleX, y, e.PixelWidth,
                 ImpellerColor.FromRgb(0xE8, 0xE8, 0xE8), w);
-            y += 32 * s;
+            y += 32 * e.DpiScaleY;
         }
     }
 
@@ -752,27 +745,26 @@ internal sealed class TextStylesScene : IGalleryScene
         ClearBg(b);
         if (e.Typography == null) return;
 
-        var s = e.DpiScale;
-        float y = 30 * s;
-        float lineH = 36 * s;
+        float y = 30 * e.DpiScaleY;
+        float lineH = 36 * e.DpiScaleY;
 
-        TextBasicsScene.DrawSimpleText(b, e.Typography, "Left aligned", 22 * s,
-            40 * s, y, e.PixelWidth - 80, ImpellerColor.FromRgb(255, 255, 255),
+        TextBasicsScene.DrawSimpleText(b, e.Typography, "Left aligned", 22 * e.DpiScaleX,
+            40 * e.DpiScaleX, y, e.PixelWidth - 80, ImpellerColor.FromRgb(255, 255, 255),
             align: ImpellerTextAlignment.kImpellerTextAlignmentLeft);
         y += lineH;
 
-        TextBasicsScene.DrawSimpleText(b, e.Typography, "Center aligned", 22 * s,
-            40 * s, y, e.PixelWidth - 80, ImpellerColor.FromRgb(255, 255, 255),
+        TextBasicsScene.DrawSimpleText(b, e.Typography, "Center aligned", 22 * e.DpiScaleX,
+            40 * e.DpiScaleX, y, e.PixelWidth - 80, ImpellerColor.FromRgb(255, 255, 255),
             align: ImpellerTextAlignment.kImpellerTextAlignmentCenter);
         y += lineH;
 
-        TextBasicsScene.DrawSimpleText(b, e.Typography, "Right aligned", 22 * s,
-            40 * s, y, e.PixelWidth - 80, ImpellerColor.FromRgb(255, 255, 255),
+        TextBasicsScene.DrawSimpleText(b, e.Typography, "Right aligned", 22 * e.DpiScaleX,
+            40 * e.DpiScaleX, y, e.PixelWidth - 80, ImpellerColor.FromRgb(255, 255, 255),
             align: ImpellerTextAlignment.kImpellerTextAlignmentRight);
         y += lineH * 2;
 
         // Decorations
-        DrawTextWithDecoration(b, e.Typography, "Underlined text", 26 * s, 40 * s, y, e.PixelWidth - 80,
+        DrawTextWithDecoration(b, e.Typography, "Underlined text", 26 * e.DpiScaleX, 40 * e.DpiScaleX, y, e.PixelWidth - 80,
             ImpellerColor.FromRgb(255, 255, 255),
             new ImpellerTextDecoration(
                 ImpellerTextDecorationType.kImpellerTextDecorationTypeUnderline,
@@ -780,7 +772,7 @@ internal sealed class TextStylesScene : IGalleryScene
                 ImpellerColor.FromRgb(255, 80, 80)));
         y += lineH * 1.4f;
 
-        DrawTextWithDecoration(b, e.Typography, "Strikethrough text", 26 * s, 40 * s, y, e.PixelWidth - 80,
+        DrawTextWithDecoration(b, e.Typography, "Strikethrough text", 26 * e.DpiScaleX, 40 * e.DpiScaleX, y, e.PixelWidth - 80,
             ImpellerColor.FromRgb(255, 255, 255),
             new ImpellerTextDecoration(
                 ImpellerTextDecorationType.kImpellerTextDecorationTypeLineThrough,
@@ -788,7 +780,7 @@ internal sealed class TextStylesScene : IGalleryScene
                 ImpellerColor.FromRgb(80, 200, 255)));
         y += lineH * 1.4f;
 
-        DrawTextWithDecoration(b, e.Typography, "Underline + Overline + dashed", 26 * s, 40 * s, y, e.PixelWidth - 80,
+        DrawTextWithDecoration(b, e.Typography, "Underline + Overline + dashed", 26 * e.DpiScaleX, 40 * e.DpiScaleX, y, e.PixelWidth - 80,
             ImpellerColor.FromRgb(220, 220, 220),
             new ImpellerTextDecoration(
                 ImpellerTextDecorationType.kImpellerTextDecorationTypeUnderline | ImpellerTextDecorationType.kImpellerTextDecorationTypeOverline,
@@ -797,8 +789,8 @@ internal sealed class TextStylesScene : IGalleryScene
         y += lineH * 1.6f;
 
         // CJK rendering
-        TextBasicsScene.DrawSimpleText(b, e.Typography, "中文字符渲染：你好，世界！", 26 * s,
-            40 * s, y, e.PixelWidth - 80, ImpellerColor.FromRgb(255, 200, 100));
+        TextBasicsScene.DrawSimpleText(b, e.Typography, "中文字符渲染：你好，世界！", 26 * e.DpiScaleX,
+            40 * e.DpiScaleX, y, e.PixelWidth - 80, ImpellerColor.FromRgb(255, 200, 100));
     }
 
     private static void DrawTextWithDecoration(
@@ -845,7 +837,6 @@ internal sealed class AnimationShowcaseScene : IGalleryScene
         var b = e.Builder;
         float t = (float)e.TotalTime.TotalSeconds;
         int w = e.PixelWidth, h = e.PixelHeight;
-        var s = e.DpiScale;
 
         // Animated background
         using (var bg = ImpellerPaint.New()!)
@@ -878,8 +869,8 @@ internal sealed class AnimationShowcaseScene : IGalleryScene
             const int count = 8;
             float cx = w / 2f, cy = h / 2f;
             float orbit = MathF.Min(w, h) * 0.32f;
-            float boxHalf = 28f * s;
-            float cornerR = 10f * s;
+            float boxHalf = 28f * e.DpiScaleX;
+            float cornerR = 10f * e.DpiScaleX;
             using var p = ImpellerPaint.New()!;
             for (int i = 0; i < count; i++)
             {
@@ -905,13 +896,13 @@ internal sealed class AnimationShowcaseScene : IGalleryScene
         // Title text
         if (e.Typography != null)
         {
-            TextBasicsScene.DrawSimpleText(b, e.Typography, "Impeller Gallery — Showcase", 28 * s,
-                0, 24 * s, w, ImpellerColor.FromRgb(255, 255, 255),
+            TextBasicsScene.DrawSimpleText(b, e.Typography, "Impeller Gallery — Showcase", 28 * e.DpiScaleX,
+                0, 24 * e.DpiScaleX, w, ImpellerColor.FromRgb(255, 255, 255),
                 weight: ImpellerFontWeight.kImpellerFontWeight600,
                 align: ImpellerTextAlignment.kImpellerTextAlignmentCenter);
 
-            TextBasicsScene.DrawSimpleText(b, e.Typography, $"frame {e.FrameNumber}", 14 * s,
-                0, h - 26 * s, w, ImpellerColor.FromRgb(180, 180, 180),
+            TextBasicsScene.DrawSimpleText(b, e.Typography, $"frame {e.FrameNumber}", 14 * e.DpiScaleX,
+                0, h - 26 * e.DpiScaleX, w, ImpellerColor.FromRgb(180, 180, 180),
                 align: ImpellerTextAlignment.kImpellerTextAlignmentCenter);
         }
     }
@@ -979,7 +970,6 @@ internal sealed class ClippingScene : IGalleryScene
     {
         var b = e.Builder;
         SceneHelpers.ClearBg(b);
-        var s = e.DpiScale;
 
         // The thing being clipped: a rainbow striped rectangle
         void DrawStripes(ImpellerDisplayListBuilder b, ImpellerRect bounds)
@@ -1124,7 +1114,6 @@ internal sealed class MaskBlurScene : IGalleryScene
     {
         var b = e.Builder;
         SceneHelpers.ClearBg(b);
-        var s = e.DpiScale;
 
         (ImpellerBlurStyle style, string label)[] styles =
         {
@@ -1149,7 +1138,7 @@ internal sealed class MaskBlurScene : IGalleryScene
             b.DrawOval(new ImpellerRect(x + 30, yPad + 30, cellW - 60, cellH - 60), p);
 
             if (e.Typography != null)
-                TextBasicsScene.DrawSimpleText(b, e.Typography, styles[i].label, 16 * s,
+                TextBasicsScene.DrawSimpleText(b, e.Typography, styles[i].label, 16 * e.DpiScaleX,
                     x, yPad + cellH + 10, cellW, ImpellerColor.FromRgb(0xCC, 0xCC, 0xCC),
                     align: ImpellerTextAlignment.kImpellerTextAlignmentCenter);
         }
@@ -1166,7 +1155,7 @@ internal sealed class MaskBlurScene : IGalleryScene
             b.DrawRect(new ImpellerRect(x, 440, 90, 90), p);
 
             if (e.Typography != null)
-                TextBasicsScene.DrawSimpleText(b, e.Typography, $"σ={sigma:0.#}", 12 * s,
+                TextBasicsScene.DrawSimpleText(b, e.Typography, $"σ={sigma:0.#}", 12 * e.DpiScaleX,
                     x, 545, 90, ImpellerColor.FromRgb(0xAA, 0xAA, 0xAA),
                     align: ImpellerTextAlignment.kImpellerTextAlignmentCenter);
         }
@@ -1248,7 +1237,7 @@ internal sealed class ColorMatrixScene : IGalleryScene
             b.Restore(); // ClipRect
 
             if (e.Typography != null)
-                TextBasicsScene.DrawSimpleText(b, e.Typography, filters[i].label, 16 * e.DpiScale,
+                TextBasicsScene.DrawSimpleText(b, e.Typography, filters[i].label, 16 * e.DpiScaleX,
                     x, y + cellH + 8, cellW, ImpellerColor.FromRgb(0xE8, 0xE8, 0xE8),
                     align: ImpellerTextAlignment.kImpellerTextAlignmentCenter);
         }
@@ -1287,7 +1276,6 @@ internal sealed class BackdropBlurScene : IGalleryScene
     {
         var b = e.Builder;
         SceneHelpers.ClearBg(b);
-        var s = e.DpiScale;
         float t = (float)e.TotalTime.TotalSeconds;
 
         // Animated colorful background
@@ -1327,7 +1315,7 @@ internal sealed class BackdropBlurScene : IGalleryScene
         if (e.Typography != null)
         {
             TextBasicsScene.DrawSimpleText(b, e.Typography, "Frosted Glass via Backdrop Blur",
-                24 * s, 0, yBand + 60, e.PixelWidth,
+                24 * e.DpiScaleX, 0, yBand + 60, e.PixelWidth,
                 ImpellerColor.FromRgb(0x18, 0x18, 0x18),
                 weight: ImpellerFontWeight.kImpellerFontWeight600,
                 align: ImpellerTextAlignment.kImpellerTextAlignmentCenter);
@@ -1347,7 +1335,6 @@ internal sealed class AnalogClockScene : IGalleryScene
     {
         var b = e.Builder;
         SceneHelpers.ClearBg(b, 0x18, 0x1C, 0x24);
-        var s = e.DpiScale;
 
         float cx = e.PixelWidth / 2f;
         float cy = e.PixelHeight / 2f;
@@ -1362,7 +1349,7 @@ internal sealed class AnalogClockScene : IGalleryScene
             // Bezel
             p.SetColor(ImpellerColor.FromRgb(0x32, 0x26, 0x1B));
             p.SetDrawStyle(ImpellerDrawStyle.kImpellerDrawStyleStroke);
-            p.SetStrokeWidth(8f * s);
+            p.SetStrokeWidth(8f * e.DpiScaleX);
             b.DrawOval(new ImpellerRect((int)(cx - r), (int)(cy - r), (int)(r * 2), (int)(r * 2)), p);
         }
 
@@ -1375,10 +1362,10 @@ internal sealed class AnalogClockScene : IGalleryScene
             for (int i = 0; i < 60; i++)
             {
                 bool isHour = i % 5 == 0;
-                p.SetStrokeWidth((isHour ? 5f : 2f) * s);
+                p.SetStrokeWidth((isHour ? 5f : 2f) * e.DpiScaleX);
                 float ang = i * MathF.PI / 30 - MathF.PI / 2;
-                float outerR = r - 8 * s;
-                float innerR = outerR - (isHour ? 22 * s : 10 * s);
+                float outerR = r - 8 * e.DpiScaleX;
+                float innerR = outerR - (isHour ? 22 * e.DpiScaleX : 10 * e.DpiScaleX);
                 b.DrawLine(
                     new ImpellerPoint { X = cx + MathF.Cos(ang) * outerR, Y = cy + MathF.Sin(ang) * outerR },
                     new ImpellerPoint { X = cx + MathF.Cos(ang) * innerR, Y = cy + MathF.Sin(ang) * innerR },
@@ -1393,19 +1380,19 @@ internal sealed class AnalogClockScene : IGalleryScene
         float hrF = (now.Hour % 12) + minF / 60f;
 
         // Hour hand
-        DrawHand(b, cx, cy, hrF / 12f, r * 0.50f, 9f * s, ImpellerColor.FromRgb(0x32, 0x26, 0x1B));
+        DrawHand(b, cx, cy, hrF / 12f, r * 0.50f, 9f * e.DpiScaleX, ImpellerColor.FromRgb(0x32, 0x26, 0x1B));
         // Minute hand
-        DrawHand(b, cx, cy, minF / 60f, r * 0.72f, 6f * s, ImpellerColor.FromRgb(0x32, 0x26, 0x1B));
+        DrawHand(b, cx, cy, minF / 60f, r * 0.72f, 6f * e.DpiScaleX, ImpellerColor.FromRgb(0x32, 0x26, 0x1B));
         // Second hand (red, thin)
-        DrawHand(b, cx, cy, secF / 60f, r * 0.80f, 2f * s, ImpellerColor.FromRgb(0xD0, 0x40, 0x40));
+        DrawHand(b, cx, cy, secF / 60f, r * 0.80f, 2f * e.DpiScaleX, ImpellerColor.FromRgb(0xD0, 0x40, 0x40));
 
         // Center cap
         using (var p = ImpellerPaint.New()!)
         {
             p.SetColor(ImpellerColor.FromRgb(0x32, 0x26, 0x1B));
-            b.DrawOval(new ImpellerRect((int)(cx - 8 * s), (int)(cy - 8 * s), (int)(16 * s), (int)(16 * s)), p);
+            b.DrawOval(new ImpellerRect((int)(cx - 8 * e.DpiScaleX), (int)(cy - 8 * e.DpiScaleY), (int)(16 * e.DpiScaleX), (int)(16 * e.DpiScaleY)), p);
             p.SetColor(ImpellerColor.FromRgb(0xD0, 0x40, 0x40));
-            b.DrawOval(new ImpellerRect((int)(cx - 4 * s), (int)(cy - 4 * s), (int)(8 * s), (int)(8 * s)), p);
+            b.DrawOval(new ImpellerRect((int)(cx - 4 * e.DpiScaleX), (int)(cy - 4 * e.DpiScaleY), (int)(8 * e.DpiScaleX), (int)(8 * e.DpiScaleY)), p);
         }
     }
 
@@ -1439,7 +1426,6 @@ internal sealed class BarChartScene : IGalleryScene
     {
         var b = e.Builder;
         SceneHelpers.ClearBg(b, 0x1A, 0x1D, 0x22);
-        var s = e.DpiScale;
         float t = (float)e.TotalTime.TotalSeconds;
 
         float marginL = 80, marginR = 40, marginT = 60, marginB = 80;
@@ -1484,20 +1470,20 @@ internal sealed class BarChartScene : IGalleryScene
             // Value label
             if (e.Typography != null)
             {
-                TextBasicsScene.DrawSimpleText(b, e.Typography, $"{(int)(_targets[i] * 100)}", 13 * s,
-                    x, y - 22 * s, (int)barW,
+                TextBasicsScene.DrawSimpleText(b, e.Typography, $"{(int)(_targets[i] * 100)}", 13 * e.DpiScaleX,
+                    x, y - 22 * e.DpiScaleY, (int)barW,
                     ImpellerColor.FromRgb(0xE8, 0xE8, 0xE8),
                     align: ImpellerTextAlignment.kImpellerTextAlignmentCenter);
-                TextBasicsScene.DrawSimpleText(b, e.Typography, _labels[i], 13 * s,
-                    x, baseY + 12 * s, (int)barW,
+                TextBasicsScene.DrawSimpleText(b, e.Typography, _labels[i], 13 * e.DpiScaleX,
+                    x, baseY + 12 * e.DpiScaleY, (int)barW,
                     ImpellerColor.FromRgb(0x9A, 0xA0, 0xAC),
                     align: ImpellerTextAlignment.kImpellerTextAlignmentCenter);
             }
         }
 
         if (e.Typography != null)
-            TextBasicsScene.DrawSimpleText(b, e.Typography, "Monthly Activity", 22 * s,
-                0, 20 * s, e.PixelWidth,
+            TextBasicsScene.DrawSimpleText(b, e.Typography, "Monthly Activity", 22 * e.DpiScaleX,
+                0, 20 * e.DpiScaleX, e.PixelWidth,
                 ImpellerColor.FromRgb(0xFF, 0xFF, 0xFF),
                 weight: ImpellerFontWeight.kImpellerFontWeight600,
                 align: ImpellerTextAlignment.kImpellerTextAlignmentCenter);
@@ -1525,7 +1511,6 @@ internal sealed class PieChartScene : IGalleryScene
     {
         var b = e.Builder;
         SceneHelpers.ClearBg(b, 0x1A, 0x1D, 0x22);
-        var s = e.DpiScale;
         float t = (float)e.TotalTime.TotalSeconds;
 
         float total = 0;
@@ -1556,11 +1541,11 @@ internal sealed class PieChartScene : IGalleryScene
             {
                 var (r, g, bb) = SceneHelpers.HsvToRgb(i / (float)_data.Length, 0.7f, 1.0f);
                 sw.SetColor(new ImpellerColor { Alpha = 1, Red = r, Green = g, Blue = bb });
-                b.DrawRoundedRect(new ImpellerRect((int)legendX, (int)(legendY + i * 40 * s), (int)(20 * s), (int)(20 * s)),
-                    SceneHelpers.UniformRadii(4 * s), sw);
+                b.DrawRoundedRect(new ImpellerRect((int)legendX, (int)(legendY + i * 40 * e.DpiScaleY), (int)(20 * e.DpiScaleX), (int)(20 * e.DpiScaleY)),
+                    SceneHelpers.UniformRadii(4 * e.DpiScaleX), sw);
                 TextBasicsScene.DrawSimpleText(b, e.Typography,
                     $"{_data[i].label}  {_data[i].value:0}%",
-                    15 * s, legendX + 32 * s, legendY + i * 40 * s + 1 * s, e.PixelWidth,
+                    15 * e.DpiScaleX, legendX + 32 * e.DpiScaleX, legendY + i * 40 * e.DpiScaleY + 1 * e.DpiScaleY, e.PixelWidth,
                     ImpellerColor.FromRgb(0xE8, 0xE8, 0xE8));
             }
         }
@@ -1600,23 +1585,22 @@ internal sealed class LoadingSpinnersScene : IGalleryScene
         var b = e.Builder;
         SceneHelpers.ClearBg(b);
         float t = (float)e.TotalTime.TotalSeconds;
-        var s = e.DpiScale;
 
         float[] cxs = { e.PixelWidth * 0.18f, e.PixelWidth * 0.50f, e.PixelWidth * 0.82f };
         float[] cys = { e.PixelHeight * 0.30f, e.PixelHeight * 0.70f };
 
         // 1. Rotating arc
-        DrawArcSpinner(b, cxs[0], cys[0], 50 * s, t * 240f);
+        DrawArcSpinner(b, cxs[0], cys[0], 50 * e.DpiScaleX, t * 240f);
         // 2. Dot ring fade
-        DrawDotRing(b, cxs[1], cys[0], 50 * s, t);
+        DrawDotRing(b, cxs[1], cys[0], 50 * e.DpiScaleX, t);
         // 3. Pulsing dots
-        DrawPulsingDots(b, cxs[2], cys[0], 50 * s, t);
+        DrawPulsingDots(b, cxs[2], cys[0], 50 * e.DpiScaleX, t);
         // 4. Bouncing bars
-        DrawBouncingBars(b, cxs[0], cys[1], 50 * s, t);
+        DrawBouncingBars(b, cxs[0], cys[1], 50 * e.DpiScaleX, t);
         // 5. Ring trail
-        DrawRingTrail(b, cxs[1], cys[1], 50 * s, t);
+        DrawRingTrail(b, cxs[1], cys[1], 50 * e.DpiScaleX, t);
         // 6. Orbiting balls
-        DrawOrbitingBalls(b, cxs[2], cys[1], 50 * s, t);
+        DrawOrbitingBalls(b, cxs[2], cys[1], 50 * e.DpiScaleX, t);
     }
 
     private static void DrawArcSpinner(ImpellerDisplayListBuilder b, float cx, float cy, float r, float angleDeg)
@@ -1833,7 +1817,6 @@ internal sealed class CardLayoutScene : IGalleryScene
     {
         var b = e.Builder;
         SceneHelpers.ClearBg(b, 0x1F, 0x22, 0x29);
-        var s = e.DpiScale;
 
         var cards = new (string title, string body, byte r, byte g, byte bb)[]
         {
@@ -1861,7 +1844,7 @@ internal sealed class CardLayoutScene : IGalleryScene
             {
                 pb.AddRoundedRect(new ImpellerRect(x, y, cellW, cellH), SceneHelpers.UniformRadii(14));
                 using var path = pb.TakePathNew(ImpellerFillType.kImpellerFillTypeNonZero)!;
-                b.DrawShadow(path, ImpellerColor.FromRgb(0x00, 0x00, 0x00), 8f, 0, (float)e.DpiScale);
+                b.DrawShadow(path, ImpellerColor.FromRgb(0x00, 0x00, 0x00), 8f, 0, (float)e.DpiScaleX);
             }
 
             // Card background
@@ -1886,12 +1869,12 @@ internal sealed class CardLayoutScene : IGalleryScene
             {
                 int tx = x + 24;
                 int tw = cellW - 48;
-                TextBasicsScene.DrawSimpleText(b, e.Typography, cards[i].title, 22 * s,
-                    tx, y + 22 * s, tw,
+                TextBasicsScene.DrawSimpleText(b, e.Typography, cards[i].title, 22 * e.DpiScaleX,
+                    tx, y + 22 * e.DpiScaleY, tw,
                     ImpellerColor.FromRgb(cards[i].r, cards[i].g, cards[i].bb),
                     weight: ImpellerFontWeight.kImpellerFontWeight700);
 
-                DrawWrappedBody(b, e.Typography, cards[i].body, 14 * s, tx, y + 64 * s, tw,
+                DrawWrappedBody(b, e.Typography, cards[i].body, 14 * e.DpiScaleY, tx, y + 64 * e.DpiScaleY, tw,
                     ImpellerColor.FromRgb(0xC8, 0xCD, 0xD5));
             }
         }
@@ -1933,7 +1916,7 @@ internal sealed class HexGridScene : IGalleryScene
         SceneHelpers.ClearBg(b, 0x10, 0x12, 0x18);
         float t = (float)e.TotalTime.TotalSeconds;
 
-        float r = 38f * e.DpiScale; // hex outer radius
+        float r = 38f * e.DpiScaleX; // hex outer radius
         float dx = r * 1.732f;       // horizontal spacing (sqrt(3))
         float dy = r * 1.5f;         // vertical spacing
         int cols = (int)(e.PixelWidth / dx) + 2;
@@ -2040,7 +2023,6 @@ internal sealed class DonutChartScene : IGalleryScene
     {
         var b = e.Builder;
         SceneHelpers.ClearBg(b, 0x18, 0x1C, 0x24);
-        var s = e.DpiScale;
         float t = (float)e.TotalTime.TotalSeconds;
 
         float total = 0;
@@ -2066,12 +2048,12 @@ internal sealed class DonutChartScene : IGalleryScene
         if (e.Typography != null)
         {
             TextBasicsScene.DrawSimpleText(b, e.Typography, "100h",
-                36 * s, cx - 100, cy - 28 * s, 200,
+                36 * e.DpiScaleY, cx - 100, cy - 28 * e.DpiScaleY, 200,
                 ImpellerColor.FromRgb(0xFF, 0xFF, 0xFF),
                 weight: ImpellerFontWeight.kImpellerFontWeight700,
                 align: ImpellerTextAlignment.kImpellerTextAlignmentCenter);
             TextBasicsScene.DrawSimpleText(b, e.Typography, "this week",
-                14 * s, cx - 100, cy + 18 * s, 200,
+                14 * e.DpiScaleY, cx - 100, cy + 18 * e.DpiScaleY, 200,
                 ImpellerColor.FromRgb(0xA0, 0xA8, 0xB2),
                 align: ImpellerTextAlignment.kImpellerTextAlignmentCenter);
 
@@ -2083,10 +2065,10 @@ internal sealed class DonutChartScene : IGalleryScene
             {
                 var (rr, gg, bb) = SceneHelpers.HsvToRgb(i / (float)_data.Length, 0.7f, 1.0f);
                 sw.SetColor(new ImpellerColor { Alpha = 1, Red = rr, Green = gg, Blue = bb });
-                b.DrawOval(new ImpellerRect((int)legendX, (int)(legendY + i * 42 * s), (int)(20 * s), (int)(20 * s)), sw);
+                b.DrawOval(new ImpellerRect((int)legendX, (int)(legendY + i * 42 * e.DpiScaleY), (int)(20 * e.DpiScaleX), (int)(20 * e.DpiScaleY)), sw);
                 TextBasicsScene.DrawSimpleText(b, e.Typography,
                     $"{_data[i].label}  —  {_data[i].value:0}h",
-                    16 * s, legendX + 32 * s, legendY + i * 42 * s, e.PixelWidth,
+                    16 * e.DpiScaleX, legendX + 32 * e.DpiScaleX, legendY + i * 42 * e.DpiScaleY, e.PixelWidth,
                     ImpellerColor.FromRgb(0xE8, 0xE8, 0xE8));
             }
         }
@@ -2127,7 +2109,6 @@ internal sealed class GaugeScene : IGalleryScene
     {
         var b = e.Builder;
         SceneHelpers.ClearBg(b, 0x18, 0x1C, 0x24);
-        var s = e.DpiScale;
         float t = (float)e.TotalTime.TotalSeconds;
 
         float cx = e.PixelWidth / 2f;
@@ -2135,11 +2116,11 @@ internal sealed class GaugeScene : IGalleryScene
         float radius = MathF.Min(cx, e.PixelHeight * 0.42f);
 
         // Background arc
-        DrawHalfArc(b, cx, cy, radius, 0xE8, 0xE8, 0xE8, alpha: 0.10f, thickness: 26f * s);
+        DrawHalfArc(b, cx, cy, radius, 0xE8, 0xE8, 0xE8, alpha: 0.10f, thickness: 26f * e.DpiScaleX);
 
         // Value fill arc (animated)
         float value = 0.5f + 0.5f * MathF.Sin(t * 0.6f); // 0..1
-        DrawColoredArc(b, cx, cy, radius, value, 26f * s);
+        DrawColoredArc(b, cx, cy, radius, value, 26f * e.DpiScaleX);
 
         // Ticks
         using (var p = ImpellerPaint.New()!)
@@ -2150,10 +2131,10 @@ internal sealed class GaugeScene : IGalleryScene
             for (int i = 0; i <= 10; i++)
             {
                 bool major = i % 2 == 0;
-                p.SetStrokeWidth((major ? 3f : 1.5f) * s);
+                p.SetStrokeWidth((major ? 3f : 1.5f) * e.DpiScaleX);
                 float ang = MathF.PI + i * MathF.PI / 10;
-                float r0 = radius - 38 * s;
-                float r1 = r0 - (major ? 14 * s : 7 * s);
+                float r0 = radius - 38 * e.DpiScaleX;
+                float r1 = r0 - (major ? 14 * e.DpiScaleX : 7 * e.DpiScaleX);
                 b.DrawLine(
                     new ImpellerPoint { X = cx + MathF.Cos(ang) * r0, Y = cy + MathF.Sin(ang) * r0 },
                     new ImpellerPoint { X = cx + MathF.Cos(ang) * r1, Y = cy + MathF.Sin(ang) * r1 },
@@ -2167,16 +2148,16 @@ internal sealed class GaugeScene : IGalleryScene
             float ang = MathF.PI + value * MathF.PI;
             p.SetColor(ImpellerColor.FromRgb(0xE8, 0x6F, 0x6F));
             p.SetDrawStyle(ImpellerDrawStyle.kImpellerDrawStyleStroke);
-            p.SetStrokeWidth(5f * s);
+            p.SetStrokeWidth(5f * e.DpiScaleX);
             p.SetStrokeCap(ImpellerStrokeCap.kImpellerStrokeCapRound);
             b.DrawLine(
                 new ImpellerPoint { X = cx, Y = cy },
-                new ImpellerPoint { X = cx + MathF.Cos(ang) * (radius - 50 * s), Y = cy + MathF.Sin(ang) * (radius - 50 * s) },
+                new ImpellerPoint { X = cx + MathF.Cos(ang) * (radius - 50 * e.DpiScaleY), Y = cy + MathF.Sin(ang) * (radius - 50 * e.DpiScaleY) },
                 p);
 
             p.SetDrawStyle(ImpellerDrawStyle.kImpellerDrawStyleFill);
             p.SetColor(ImpellerColor.FromRgb(0x2D, 0x32, 0x3C));
-            b.DrawOval(new ImpellerRect((int)(cx - 12 * s), (int)(cy - 12 * s), (int)(24 * s), (int)(24 * s)), p);
+            b.DrawOval(new ImpellerRect((int)(cx - 12 * e.DpiScaleY), (int)(cy - 12 * e.DpiScaleY), (int)(24 * e.DpiScaleY), (int)(24 * e.DpiScaleY)), p);
         }
 
         // Value readout
@@ -2184,7 +2165,7 @@ internal sealed class GaugeScene : IGalleryScene
         {
             int pct = (int)(value * 100);
             TextBasicsScene.DrawSimpleText(b, e.Typography, $"{pct}%",
-                40 * s, cx - 100, cy + 30 * s, 200,
+                40 * e.DpiScaleY, cx - 100, cy + 30 * e.DpiScaleY, 200,
                 ImpellerColor.FromRgb(0xF0, 0xF0, 0xF0),
                 weight: ImpellerFontWeight.kImpellerFontWeight700,
                 align: ImpellerTextAlignment.kImpellerTextAlignmentCenter);
@@ -2245,7 +2226,6 @@ internal sealed class SparklineScene : IGalleryScene
     {
         var b = e.Builder;
         SceneHelpers.ClearBg(b, 0x1A, 0x1D, 0x22);
-        var s = e.DpiScale;
         float t = (float)e.TotalTime.TotalSeconds;
 
         const int cols = 3;
@@ -2274,7 +2254,7 @@ internal sealed class SparklineScene : IGalleryScene
             // Title
             if (e.Typography != null)
             {
-                TextBasicsScene.DrawSimpleText(b, e.Typography, titles[i], 14 * s,
+                TextBasicsScene.DrawSimpleText(b, e.Typography, titles[i], 14 * e.DpiScaleX,
                     x + 16, y + 14, cellW - 32,
                     ImpellerColor.FromRgb(0xA0, 0xA8, 0xB2),
                     weight: ImpellerFontWeight.kImpellerFontWeight500);
@@ -2284,8 +2264,8 @@ internal sealed class SparklineScene : IGalleryScene
             float value = 35 + 60 * (0.5f + 0.5f * MathF.Sin(t * 0.4f + i * 0.7f));
             if (e.Typography != null)
             {
-                TextBasicsScene.DrawSimpleText(b, e.Typography, $"{value:0.0}", 28 * s,
-                    x + 16, y + 38 * s, cellW - 32,
+                TextBasicsScene.DrawSimpleText(b, e.Typography, $"{value:0.0}", 28 * e.DpiScaleX,
+                    x + 16, y + 38 * e.DpiScaleY, cellW - 32,
                     ImpellerColor.FromRgb(0xFF, 0xFF, 0xFF),
                     weight: ImpellerFontWeight.kImpellerFontWeight700);
             }
@@ -2331,7 +2311,7 @@ internal sealed class SparklineScene : IGalleryScene
                 using var p = ImpellerPaint.New()!;
                 p.SetColor(new ImpellerColor { Alpha = 1f, Red = cr, Green = cg, Blue = cbb });
                 p.SetDrawStyle(ImpellerDrawStyle.kImpellerDrawStyleStroke);
-                p.SetStrokeWidth(2f * s);
+                p.SetStrokeWidth(2f * e.DpiScaleX);
                 p.SetStrokeCap(ImpellerStrokeCap.kImpellerStrokeCapRound);
                 b.DrawPath(path, p);
             }
@@ -2353,7 +2333,7 @@ internal static class StressHelpers
         if (e.Typography == null) return;
         TextBasicsScene.DrawSimpleText(e.Builder, e.Typography,
             $"{label}: {count:N0}  •  frame {e.FrameNumber}",
-            16 * e.DpiScale, 12, 12, e.PixelWidth,
+            16 * e.DpiScaleX, 12, 12, e.PixelWidth,
             ImpellerColor.FromRgb(0xFF, 0xFF, 0xFF),
             weight: ImpellerFontWeight.kImpellerFontWeight600);
     }
@@ -2759,7 +2739,7 @@ internal sealed class StressTestShadowsScene : StressTestSceneBase
             {
                 pb.AddRoundedRect(new ImpellerRect(x, y, w, h), radii);
                 using var path = pb.TakePathNew(ImpellerFillType.kImpellerFillTypeNonZero)!;
-                b.DrawShadow(path, shadowColor, elev, 0, (float)e.DpiScale);
+                b.DrawShadow(path, shadowColor, elev, 0, (float)e.DpiScaleX);
             }
 
             byte r = (byte)(160 + rng.Next(96));
@@ -2897,7 +2877,7 @@ internal sealed class StressTestMixedPipelineScene : StressTestSceneBase
                 {
                     pb.AddRoundedRect(new ImpellerRect(x, y, w, h), radii);
                     using var path = pb.TakePathNew(ImpellerFillType.kImpellerFillTypeNonZero)!;
-                    b.DrawShadow(path, shadowColor, 6f, 0, (float)e.DpiScale);
+                    b.DrawShadow(path, shadowColor, 6f, 0, (float)e.DpiScaleX);
                 }
                 fill.SetColor(ImpellerColor.FromRgb(0xE8, 0xE8, 0xF0));
                 b.DrawRoundedRect(new ImpellerRect(x, y, w, h), radii, fill);

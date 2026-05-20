@@ -1,6 +1,7 @@
 using System;
 
 using Silk.NET.Vulkan;
+using Silk.NET.Vulkan.Extensions.KHR;
 
 namespace NImpeller.Wpf.Interop;
 
@@ -17,6 +18,7 @@ namespace NImpeller.Wpf.Interop;
 internal sealed unsafe class SharedVulkanImage : IDisposable
 {
     private readonly Vk _vk;
+    private readonly KhrExternalMemoryWin32 _extMemWin32;
     private readonly Device _device;
     private readonly PhysicalDevice _physicalDevice;
     private readonly Format _format;
@@ -34,11 +36,13 @@ internal sealed unsafe class SharedVulkanImage : IDisposable
     public uint Width => _width;
     public uint Height => _height;
 
-    public SharedVulkanImage(Vk vk, PhysicalDevice physicalDevice, Device device,
+    public SharedVulkanImage(Vk vk, KhrExternalMemoryWin32 extMemWin32,
+        PhysicalDevice physicalDevice, Device device,
         Format format = Format.B8G8R8A8Unorm,
         ExternalMemoryHandleTypeFlags handleType = ExternalMemoryHandleTypeFlags.D3D11TextureKmtBit)
     {
         _vk = vk;
+        _extMemWin32 = extMemWin32;
         _physicalDevice = physicalDevice;
         _device = device;
         _format = format;
@@ -71,6 +75,21 @@ internal sealed unsafe class SharedVulkanImage : IDisposable
 
         _vk.GetImageMemoryRequirements(_device, _image, out var requirements);
 
+        // Per Vulkan spec: memoryTypeIndex used to import external memory must satisfy
+        // BOTH the image's memory requirements AND the external-handle's compatible
+        // memory types reported by vkGetMemoryWin32HandlePropertiesKHR. Most drivers
+        // happen to report the same set (device-local for D3D11 shared textures),
+        // but using only the image's typeBits is a spec violation that has bitten
+        // people on niche hardware (some Intel iGPU + WARP combos).
+        var handleProps = new MemoryWin32HandlePropertiesKHR(StructureType.MemoryWin32HandlePropertiesKhr);
+        Check(_extMemWin32.GetMemoryWin32HandleProperties(_device, _handleType, sharedHandle, &handleProps),
+            "vkGetMemoryWin32HandlePropertiesKHR");
+        uint compatibleTypeBits = requirements.MemoryTypeBits & handleProps.MemoryTypeBits;
+        if (compatibleTypeBits == 0)
+            throw new InvalidOperationException(
+                $"No Vulkan memory type satisfies both image requirements (0x{requirements.MemoryTypeBits:X}) " +
+                $"and external handle requirements (0x{handleProps.MemoryTypeBits:X}) for handle type {_handleType}.");
+
         var importInfo = new ImportMemoryWin32HandleInfoKHR(
             handleType: _handleType,
             handle: sharedHandle);
@@ -86,7 +105,7 @@ internal sealed unsafe class SharedVulkanImage : IDisposable
         var memoryInfo = new MemoryAllocateInfo(
             pNext: &importInfo,
             allocationSize: requirements.Size,
-            memoryTypeIndex: GetMemoryTypeIndex(requirements.MemoryTypeBits, MemoryPropertyFlags.DeviceLocalBit));
+            memoryTypeIndex: GetMemoryTypeIndex(compatibleTypeBits, MemoryPropertyFlags.DeviceLocalBit));
 
         Check(_vk.AllocateMemory(_device, &memoryInfo, null, out _memory), "vkAllocateMemory(shared)");
         Check(_vk.BindImageMemory(_device, _image, _memory, 0ul), "vkBindImageMemory(shared)");

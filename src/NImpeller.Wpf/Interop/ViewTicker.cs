@@ -45,7 +45,6 @@ internal static class ViewTicker
 
     private static void OnRendering(object? sender, EventArgs e)
     {
-        // Snapshot to allow callbacks to unregister themselves without invalidating iteration.
         for (int i = 0; i < Subscribers.Count; i++)
         {
             try { Subscribers[i](); }

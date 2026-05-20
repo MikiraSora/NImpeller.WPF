@@ -19,7 +19,8 @@ public sealed class ImpellerRenderEventArgs : EventArgs
         ImpellerTypographyContext? typography,
         int pixelWidth,
         int pixelHeight,
-        float dpiScale,
+        float dpiScaleX,
+        float dpiScaleY,
         TimeSpan deltaTime,
         TimeSpan totalTime,
         long frameNumber)
@@ -29,7 +30,8 @@ public sealed class ImpellerRenderEventArgs : EventArgs
         Typography = typography;
         PixelWidth = pixelWidth;
         PixelHeight = pixelHeight;
-        DpiScale = dpiScale;
+        DpiScaleX = dpiScaleX;
+        DpiScaleY = dpiScaleY;
         DeltaTime = deltaTime;
         TotalTime = totalTime;
         FrameNumber = frameNumber;
@@ -50,8 +52,18 @@ public sealed class ImpellerRenderEventArgs : EventArgs
     /// <summary>Physical pixel height of the render target.</summary>
     public int PixelHeight { get; }
 
-    /// <summary>System DPI scale (1.0 at 96 DPI, 1.5 at 144 DPI, etc.).</summary>
-    public float DpiScale { get; }
+    /// <summary>
+    /// Horizontal system DPI scale (1.0 at 96 DPI, 1.5 at 144 DPI, etc.).
+    /// Multiply font sizes / 1-px strokes by this for crispness.
+    /// </summary>
+    public float DpiScaleX { get; }
+
+    /// <summary>
+    /// Vertical system DPI scale. Equal to <see cref="DpiScaleX"/> on almost
+    /// all setups, but separate on virtual / projected displays with
+    /// non-square DPI.
+    /// </summary>
+    public float DpiScaleY { get; }
 
     /// <summary>Time since the previous frame on this view.</summary>
     public TimeSpan DeltaTime { get; }

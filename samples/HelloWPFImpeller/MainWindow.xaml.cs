@@ -65,7 +65,7 @@ public partial class MainWindow : Window
             width: e.PixelWidth,
             height: e.PixelHeight,
             frameNumber: e.FrameNumber,
-            dpiScale: e.DpiScale);
+            dpiScale: e.DpiScaleX);
         _frameCount[viewIndex]++;
     }
 }

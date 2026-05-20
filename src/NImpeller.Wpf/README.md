@@ -158,7 +158,7 @@ public partial class MainWindow : Window
         // e.Builder       — fresh ImpellerDisplayListBuilder, will be drawn after this handler returns
         // e.Typography    — shared ImpellerTypographyContext (nullable)
         // e.PixelWidth/Height — physical pixel size of the render target
-        // e.DpiScale      — system DPI scale (multiply font sizes / strokes by this for crispness)
+        // e.DpiScaleX/Y   — system DPI scale (multiply font sizes / strokes by this for crispness)
         // e.DeltaTime     — time since this view's previous frame
         // e.TotalTime     — wall clock since the view started
         // e.FrameNumber   — monotonically increasing frame counter
@@ -257,7 +257,8 @@ public sealed class ImpellerRenderEventArgs : EventArgs
     public ImpellerTypographyContext?   Typography   { get; }
     public int                          PixelWidth   { get; }
     public int                          PixelHeight  { get; }
-    public float                        DpiScale     { get; }
+    public float                        DpiScaleX    { get; }
+    public float                        DpiScaleY    { get; }
     public TimeSpan                     DeltaTime    { get; }
     public TimeSpan                     TotalTime    { get; }
     public long                         FrameNumber  { get; }

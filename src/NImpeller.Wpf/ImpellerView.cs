@@ -26,7 +26,7 @@ namespace NImpeller.Wpf;
 /// after <c>InitializeComponent()</c>. The <see cref="Render"/> event fires once per frame
 /// while the view is loaded and visible.
 /// </summary>
-public sealed unsafe class ImpellerView : FrameworkElement
+public sealed unsafe class ImpellerView : FrameworkElement, IDisposable
 {
     /// <summary>Fires once per frame on the UI thread. Issue Impeller draw calls here.</summary>
     public event EventHandler<ImpellerRenderEventArgs>? Render;
@@ -93,13 +93,51 @@ public sealed unsafe class ImpellerView : FrameworkElement
     /// <summary>
     /// Start the view with the given settings. Safe to call before or after the view is
     /// loaded — if called early, initialization is deferred until <c>Loaded</c>.
+    ///
+    /// <para><b>Settings lifetime model</b></para>
+    /// The first call (before <c>Initialize</c> runs) consumes every field of
+    /// <paramref name="settings"/> to build GPU resources and the per-frame ticker.
+    /// Subsequent calls do <b>not</b> rebuild anything; they only re-evaluate the
+    /// ticker registration based on <see cref="ImpellerViewSettings.RenderContinuously"/>
+    /// (typical use: resume after <see cref="Stop"/>). If the view is already ticking,
+    /// this method is a no-op for the ticker — call <see cref="Stop"/> first.
+    ///
+    /// <para><b>Per-field effect on re-Start</b></para>
+    /// <list type="bullet">
+    ///   <item><see cref="ImpellerViewSettings.EnableValidation"/> — process-wide and
+    ///     locked at the very first <c>Start</c> in the process (the underlying
+    ///     <c>ImpellerContext</c> is a singleton); later values are silently ignored.</item>
+    ///   <item><see cref="ImpellerViewSettings.UseDeviceDpi"/> — the new value is stored
+    ///     and will influence future <c>ComputePixelWidth/Height</c> calls (next resize
+    ///     or DPI change), but does NOT immediately rebuild the existing swapchain /
+    ///     shared texture. To apply at the GPU level, detach the view, wait for
+    ///     <c>Unloaded</c>, then re-attach with a fresh <c>Start</c>.</item>
+    ///   <item><see cref="ImpellerViewSettings.LogicalSizeOverride"/> — read on the next
+    ///     <c>MeasureOverride</c> pass; call <c>InvalidateMeasure</c> to apply sooner.</item>
+    ///   <item><see cref="ImpellerViewSettings.RenderContinuously"/> — read here on
+    ///     every call to decide whether to (re)register the ticker. Note: if the view
+    ///     is already ticking and you change this to <c>false</c>, the ticker keeps
+    ///     running until <see cref="Stop"/> is called.</item>
+    /// </list>
     /// </summary>
     public void Start(ImpellerViewSettings settings)
     {
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _startRequested = true;
+
         if (IsLoaded && !_isInitialized)
+        {
             Initialize();
+            return;
+        }
+
+        // Already initialized but ticker was previously unregistered by Stop() —
+        // re-register so the view resumes rendering without rebuilding GPU resources.
+        if (_isInitialized && _tickCallback == null && _settings.RenderContinuously)
+        {
+            RegisterToTicker();
+            _isStarted = true;
+        }
     }
 
     /// <summary>Request a redraw. Only meaningful when <c>RenderContinuously = false</c>.</summary>
@@ -113,6 +151,18 @@ public sealed unsafe class ImpellerView : FrameworkElement
     public void Stop()
     {
         UnregisterFromTicker();
+        _isStarted = false;
+    }
+
+    /// <summary>
+    /// Release all native GPU resources (D3D devices, VkImage, swapchain, shared host
+    /// refcount, hidden HWND). Equivalent to the <c>Unloaded</c> teardown path, but
+    /// callable from code paths where the view will never be added to the visual tree
+    /// (or where the host process exits before <c>Unloaded</c> fires). Idempotent.
+    /// </summary>
+    public void Dispose()
+    {
+        Teardown();
     }
 
     // ============================================================
@@ -185,27 +235,39 @@ public sealed unsafe class ImpellerView : FrameworkElement
         if (w < 16 || h < 16) return; // skip degenerate sizes
 
         _resizeInProgress = true;
+        Exception? failure = null;
         try
         {
             RecreateForSize(w, h);
         }
         catch (Exception ex)
         {
+            failure = ex;
             TraceLog.Log($"[ImpellerView] RecreateForSize threw: {ex.GetType().Name}: {ex.Message}");
         }
         finally
         {
             _resizeInProgress = false;
+        }
 
-            // If another SizeChanged arrived while we were recreating, the timer was
-            // restarted; otherwise check once more in case the window kept growing.
-            var w2 = ComputePixelWidth();
-            var h2 = ComputePixelHeight();
-            if ((w2 != _pixelWidth || h2 != _pixelHeight) && w2 >= 16 && h2 >= 16)
-            {
-                _resizeDebounce!.Stop();
-                _resizeDebounce.Start();
-            }
+        if (failure != null)
+        {
+            // Surface the failure via Application.DispatcherUnhandledException instead
+            // of letting the view rot in a half-torn-down state. Inner exception keeps
+            // the original Vulkan/D3D diagnostic.
+            throw new ImpellerRenderErrorException(
+                $"ImpellerView failed to recreate render resources for size {w}x{h}.",
+                failure);
+        }
+
+        // If another SizeChanged arrived while we were recreating, the timer was
+        // restarted; otherwise check once more in case the window kept growing.
+        var w2 = ComputePixelWidth();
+        var h2 = ComputePixelHeight();
+        if ((w2 != _pixelWidth || h2 != _pixelHeight) && w2 >= 16 && h2 >= 16)
+        {
+            _resizeDebounce!.Stop();
+            _resizeDebounce.Start();
         }
     }
 
@@ -239,35 +301,132 @@ public sealed unsafe class ImpellerView : FrameworkElement
         _pixelHeight = ComputePixelHeight();
         TraceLog.Log($"[ImpellerView] initial render target = {_pixelWidth}x{_pixelHeight} physical px");
 
-        // Acquire shared Impeller host
-        _host = ImpellerSharedHost.AcquireAndStart(_settings);
+        try
+        {
+            // Acquire shared Impeller host
+            _host = ImpellerSharedHost.AcquireAndStart(_settings);
 
-        // Per-view D3D resources (D3D9Ex + D3D11 device + shared texture)
-        _d3dResources = new D3DResources();
-        _d3dResources.Initialize(new WindowInteropHelper(Window.GetWindow(this)!).Handle);
-        _d3dResources.CreateOrResizeRenderTarget(_pixelWidth, _pixelHeight);
+            // Per-view D3D resources (D3D9Ex + D3D11 device + shared texture)
+            var hostWindow = Window.GetWindow(this)
+                ?? throw new InvalidOperationException(
+                    "ImpellerView must be hosted inside a Window before Start() is called. " +
+                    "If the view lives in a Popup, custom PresentationSource, or has not yet " +
+                    "been added to a Window's visual tree, defer Start() until OnLoaded.");
+            _d3dResources = new D3DResources();
+            _d3dResources.Initialize(new WindowInteropHelper(hostWindow).Handle);
+            _d3dResources.CreateOrResizeRenderTarget(_pixelWidth, _pixelHeight);
 
-        // D3DImage with DPI-aware backing so dc.DrawImage maps physical px -> DIP correctly
-        _d3dImage = new D3DImage(96.0 * _dpiScaleX, 96.0 * _dpiScaleY);
-        _d3dImage.Lock();
-        _d3dImage.SetBackBuffer(D3DResourceType.IDirect3DSurface9, _d3dResources.BackbufferSurfaceHandle);
-        _d3dImage.Unlock();
+            // D3DImage with DPI-aware backing so dc.DrawImage maps physical px -> DIP correctly
+            _d3dImage = new D3DImage(96.0 * _dpiScaleX, 96.0 * _dpiScaleY);
+            // Recover from front-buffer loss (GPU switch, RDP, lock screen, TDR) by
+            // re-attaching the back buffer when it becomes available again.
+            _d3dImage.IsFrontBufferAvailableChanged += OnFrontBufferAvailabilityChanged;
+            _d3dImage.Lock();
+            _d3dImage.SetBackBuffer(D3DResourceType.IDirect3DSurface9, _d3dResources.BackbufferSurfaceHandle);
+            _d3dImage.Unlock();
 
-        // Import D3D shared texture as VkImage on Impeller's device
-        _sharedVkImage = new SharedVulkanImage(_host.Vk, _host.VkPhysicalDevice, _host.VkDevice);
-        _sharedVkImage.Import(_d3dResources.VulkanSharedHandle, _pixelWidth, _pixelHeight);
+            // Import D3D shared texture as VkImage on Impeller's device
+            _sharedVkImage = new SharedVulkanImage(_host.Vk, _host.KhrExternalMemoryWin32Ext!, _host.VkPhysicalDevice, _host.VkDevice);
+            _sharedVkImage.Import(_d3dResources.VulkanSharedHandle, _pixelWidth, _pixelHeight);
 
-        // Per-view VkSurfaceKHR (on the shared hidden HWND), Impeller swapchain, blit context
-        CreateSurfaceAndSwapchain();
+            // Per-view VkSurfaceKHR (on the shared hidden HWND), Impeller swapchain, blit context
+            CreateSurfaceAndSwapchain();
 
-        _stopwatch.Restart();
-        _isInitialized = true;
-        _isStarted = true;
+            _stopwatch.Restart();
+            _isInitialized = true;
+            _isStarted = true;
 
-        if (_settings.RenderContinuously)
-            RegisterToTicker();
+            if (_settings.RenderContinuously)
+                RegisterToTicker();
 
-        InvalidateVisual();
+            InvalidateVisual();
+        }
+        catch
+        {
+            // Roll back partial initialization so the shared host refcount, D3D devices,
+            // VkImage and the hidden HWND are not leaked. We intentionally do not consult
+            // _isInitialized here — it is still false on this path.
+            TraceLog.Log("[ImpellerView] Initialize failed; rolling back partial state");
+            CleanupResources();
+            throw;
+        }
+    }
+
+    private void OnFrontBufferAvailabilityChanged(object? sender, DependencyPropertyChangedEventArgs e)
+    {
+        if (_d3dImage == null || _d3dResources == null) return;
+        if (!_d3dImage.IsFrontBufferAvailable) return;
+
+        // Reattach the back buffer so subsequent frames are visible again.
+        // NOTE: this assumes the underlying D3D devices are still valid. Full
+        // device-removed recovery (TDR, driver reset, GPU swap) is a follow-up.
+        try
+        {
+            _d3dImage.Lock();
+            _d3dImage.SetBackBuffer(D3DResourceType.IDirect3DSurface9, _d3dResources.BackbufferSurfaceHandle);
+            _d3dImage.Unlock();
+            InvalidateVisual();
+            TraceLog.Log("[ImpellerView] front buffer available again; back buffer reattached");
+        }
+        catch (Exception ex)
+        {
+            TraceLog.Log($"[ImpellerView] reattach back buffer threw: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Per-monitor DPI change: rebuild D3DImage (its dpiX/dpiY are baked at ctor)
+    /// and re-create the swapchain + shared texture at the new physical resolution.
+    /// Only fires under PerMonitorV2 DPI awareness; on System / unaware DPI modes
+    /// the application DPI is fixed and this override is never invoked.
+    /// </summary>
+    protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi)
+    {
+        base.OnDpiChanged(oldDpi, newDpi);
+
+        if (!_isInitialized) return;
+        if (Math.Abs(newDpi.DpiScaleX - _dpiScaleX) < 1e-6 &&
+            Math.Abs(newDpi.DpiScaleY - _dpiScaleY) < 1e-6) return;
+
+        var prevX = _dpiScaleX;
+        var prevY = _dpiScaleY;
+        _dpiScaleX = newDpi.DpiScaleX;
+        _dpiScaleY = newDpi.DpiScaleY;
+        TraceLog.Log($"[ImpellerView] DPI changed {prevX:0.###}x{prevY:0.###} -> {_dpiScaleX:0.###}x{_dpiScaleY:0.###}");
+
+        var pxW = ComputePixelWidth();
+        var pxH = ComputePixelHeight();
+        if (pxW < 16 || pxH < 16) return; // degenerate; retry on next size/dpi event
+
+        Exception? failure = null;
+        try
+        {
+            // D3DImage's dpiX/dpiY are baked at construction and cannot be mutated,
+            // so we replace the instance and re-subscribe the front-buffer recovery hook.
+            if (_d3dImage != null)
+                _d3dImage.IsFrontBufferAvailableChanged -= OnFrontBufferAvailabilityChanged;
+            _d3dImage = new D3DImage(96.0 * _dpiScaleX, 96.0 * _dpiScaleY);
+            _d3dImage.IsFrontBufferAvailableChanged += OnFrontBufferAvailabilityChanged;
+
+            // Rebuild swapchain + shared image at the new physical resolution.
+            // RecreateForSize re-attaches the back buffer on the new _d3dImage and
+            // calls InvalidateVisual so OnRender picks up the new instance.
+            RecreateForSize(pxW, pxH);
+        }
+        catch (Exception ex)
+        {
+            failure = ex;
+            TraceLog.Log($"[ImpellerView] OnDpiChanged rebuild threw: {ex.GetType().Name}: {ex.Message}");
+        }
+
+        if (failure != null)
+        {
+            // Surface via Application.DispatcherUnhandledException, matching the
+            // RecreateForSize failure path (H4).
+            throw new ImpellerRenderErrorException(
+                $"ImpellerView failed to rebuild for DPI change to {_dpiScaleX:0.###}x{_dpiScaleY:0.###}.",
+                failure);
+        }
     }
 
     private void CreateSurfaceAndSwapchain()
@@ -299,17 +458,42 @@ public sealed unsafe class ImpellerView : FrameworkElement
 
         // Per-view BlitContext, stashed in ThreadStatic so the vkCreateSwapchainKHR trampoline
         // can bind it to the freshly created swapchain handle.
-        _blitContext = new BlitContext(
-            host.Vk, host.VkDevice, host.VkQueue, host.QueueFamilyIndex,
-            _sharedVkImage!.VkImage,
-            new Extent2D(_pixelWidth, _pixelHeight),
-            host.QueueSubmitLock);
+        try
+        {
+            _blitContext = new BlitContext(
+                host.Vk, host.VkDevice, host.VkQueue, host.QueueFamilyIndex,
+                _sharedVkImage!.VkImage,
+                new Extent2D(_pixelWidth, _pixelHeight),
+                host.SharedQueueLock);
+        }
+        catch
+        {
+            // BlitContext ctor failed (CommandPool / CommandBuffer / Fence allocation) —
+            // surface was already created above and is owned by us until swapchain takes it.
+            host.KhrSurfaceExt!.DestroySurface(host.VkInstance, _vkSurface, null);
+            _vkSurface = default;
+            throw;
+        }
         VkTrampolines.SetPendingBlitContext(_blitContext);
 
-        _impellerSwapchain = host.Context.VulkanSwapchainCreateNew(new IntPtr((long)_vkSurface.Handle));
+        try
+        {
+            _impellerSwapchain = host.Context.VulkanSwapchainCreateNew(new IntPtr((long)_vkSurface.Handle));
+        }
+        catch
+        {
+            // Re-throw after cleanup so the outer code paths (Initialize/RecreateForSize)
+            // get a proper exception instead of a silently-leaked surface + blit context.
+            CleanupFailedSwapchainCreate(host);
+            throw;
+        }
+
         if (_impellerSwapchain == null)
         {
-            VkTrampolines.SetPendingBlitContext(null!);
+            // VulkanSwapchainCreateNew returned null (no exception, just failure). Surface
+            // ownership was NOT transferred — clean up to avoid accumulating one leaked
+            // VkSurfaceKHR + BlitContext per failed attempt.
+            CleanupFailedSwapchainCreate(host);
             throw new InvalidOperationException("ImpellerContext.VulkanSwapchainCreateNew returned null.");
         }
 
@@ -323,6 +507,25 @@ public sealed unsafe class ImpellerView : FrameworkElement
             }
         }
         TraceLog.Log($"[ImpellerView] swapchain registered (handle=0x{_swapchainHandle:X16})");
+    }
+
+    /// <summary>
+    /// Roll back the side effects of <see cref="CreateSurfaceAndSwapchain"/> when
+    /// <c>VulkanSwapchainCreateNew</c> never succeeded: clear the pending blit context
+    /// (otherwise it leaks into the next view's swapchain create), dispose the BlitContext
+    /// (Impeller never took it), and destroy the VkSurfaceKHR ourselves (no swapchain to
+    /// take ownership). Safe to call multiple times.
+    /// </summary>
+    private void CleanupFailedSwapchainCreate(ImpellerSharedHost host)
+    {
+        VkTrampolines.SetPendingBlitContext(null!);
+        _blitContext?.Dispose();
+        _blitContext = null;
+        if (_vkSurface.Handle != 0)
+        {
+            host.KhrSurfaceExt!.DestroySurface(host.VkInstance, _vkSurface, null);
+            _vkSurface = default;
+        }
     }
 
     private void RecreateForSize(uint pxW, uint pxH)
@@ -358,7 +561,7 @@ public sealed unsafe class ImpellerView : FrameworkElement
         _d3dImage.SetBackBuffer(D3DResourceType.IDirect3DSurface9, _d3dResources.BackbufferSurfaceHandle);
         _d3dImage.Unlock();
 
-        _sharedVkImage = new SharedVulkanImage(_host.Vk, _host.VkPhysicalDevice, _host.VkDevice);
+        _sharedVkImage = new SharedVulkanImage(_host.Vk, _host.KhrExternalMemoryWin32Ext!, _host.VkPhysicalDevice, _host.VkDevice);
         _sharedVkImage.Import(_d3dResources.VulkanSharedHandle, pxW, pxH);
 
         CreateSurfaceAndSwapchain();
@@ -368,13 +571,24 @@ public sealed unsafe class ImpellerView : FrameworkElement
     private void Teardown()
     {
         _resizeDebounce?.Stop();
+        _resizeDebounce = null;
         UnregisterFromTicker();
         if (!_isInitialized) return;
+        CleanupResources();
+    }
 
+    /// <summary>
+    /// Release all per-view native resources. Safe to call from a partially-initialized
+    /// state (e.g. when <see cref="Initialize"/> fails midway) — each handle is checked
+    /// for null/zero before being released, and <see cref="_isInitialized"/> is NOT
+    /// consulted as a guard.
+    /// </summary>
+    private void CleanupResources()
+    {
         if (_host != null)
         {
             try { _host.Vk.DeviceWaitIdle(_host.VkDevice); }
-            catch (Exception ex) { TraceLog.Log($"[ImpellerView] DeviceWaitIdle on teardown threw: {ex.Message}"); }
+            catch (Exception ex) { TraceLog.Log($"[ImpellerView] DeviceWaitIdle on cleanup threw: {ex.Message}"); }
         }
 
         if (_swapchainHandle != 0)
@@ -392,7 +606,11 @@ public sealed unsafe class ImpellerView : FrameworkElement
         _blitContext = null;
         _sharedVkImage?.Dispose();
         _sharedVkImage = null;
-        _d3dImage = null;
+        if (_d3dImage != null)
+        {
+            _d3dImage.IsFrontBufferAvailableChanged -= OnFrontBufferAvailabilityChanged;
+            _d3dImage = null;
+        }
         _d3dResources?.Dispose();
         _d3dResources = null;
         _hiddenWindow?.Dispose();
@@ -453,7 +671,8 @@ public sealed unsafe class ImpellerView : FrameworkElement
                 typography: _host!.Typography,
                 pixelWidth: (int)_pixelWidth,
                 pixelHeight: (int)_pixelHeight,
-                dpiScale: (float)_dpiScaleX,
+                dpiScaleX: (float)_dpiScaleX,
+                dpiScaleY: (float)_dpiScaleY,
                 deltaTime: deltaTime,
                 totalTime: totalTime,
                 frameNumber: _frameNumber);
@@ -468,6 +687,15 @@ public sealed unsafe class ImpellerView : FrameworkElement
             surface.Present(); // -> QueuePresentKHR trampoline blits into shared D3D texture
 
             _d3dImage.AddDirtyRect(new Int32Rect(0, 0, _d3dImage.PixelWidth, _d3dImage.PixelHeight));
+
+            // Fire Ready only on a frame that actually completed successfully.
+            // Errors are caught below; firing Ready in the catch path would mislead
+            // upstream code that uses Ready as a "first usable frame" signal.
+            if (!_frameReadyFired)
+            {
+                _frameReadyFired = true;
+                Ready?.Invoke(this, EventArgs.Empty);
+            }
         }
         catch (Exception ex)
         {
@@ -476,12 +704,6 @@ public sealed unsafe class ImpellerView : FrameworkElement
         finally
         {
             _d3dImage.Unlock();
-        }
-
-        if (!_frameReadyFired)
-        {
-            _frameReadyFired = true;
-            Ready?.Invoke(this, EventArgs.Empty);
         }
     }
 }

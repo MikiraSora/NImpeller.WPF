@@ -23,14 +23,20 @@ internal sealed unsafe class BlitContext : IDisposable
     public CommandPool CommandPool { get; private set; }
     public CommandBuffer CommandBuffer { get; private set; }
     public Fence Fence { get; private set; }
-    /// <summary>Lock that serializes <c>vkQueueSubmit</c> calls across all BlitContexts on the shared queue.</summary>
-    public object QueueSubmitLock { get; }
+    /// <summary>
+    /// Lock that serializes <c>vkQueueSubmit</c> across every BlitContext sharing
+    /// the same <see cref="Queue"/>. <b>Provided by <c>ImpellerSharedHost</c> and
+    /// shared process-wide</b> — this is intentionally the same object instance
+    /// across all views so multi-view present paths cannot race on submit.
+    /// Do not allocate a per-instance lock here.
+    /// </summary>
+    public object SharedQueueLock { get; }
     public long FrameCounter;
 
     private bool _disposed;
 
     public BlitContext(Vk vk, Device device, Queue queue, uint queueFamilyIndex,
-        Image targetImage, Extent2D targetExtent, object queueSubmitLock)
+        Image targetImage, Extent2D targetExtent, object sharedQueueLock)
     {
         Vk = vk;
         Device = device;
@@ -38,7 +44,7 @@ internal sealed unsafe class BlitContext : IDisposable
         QueueFamilyIndex = queueFamilyIndex;
         TargetImage = targetImage;
         TargetExtent = targetExtent;
-        QueueSubmitLock = queueSubmitLock;
+        SharedQueueLock = sharedQueueLock;
 
         var poolInfo = new CommandPoolCreateInfo(
             flags: CommandPoolCreateFlags.ResetCommandBufferBit,

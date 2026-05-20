@@ -40,6 +40,16 @@ internal static unsafe class VkTrampolines
     // --- LUID for physical-device reordering (set once by ImpellerSharedHost) ---
     public static ulong TargetAdapterLuid;
 
+    /// <summary>
+    /// Exception stashed by a trampoline that detected a fatal initialization
+    /// mismatch (e.g. no Vulkan physical device matches the D3D adapter LUID).
+    /// Throwing directly from an <see cref="System.Runtime.InteropServices.UnmanagedCallersOnlyAttribute"/>
+    /// frame crosses the native boundary and is undefined behavior in .NET, so
+    /// we stash here and let <c>ImpellerSharedHost</c> re-throw on the managed
+    /// side after <c>ImpellerContext.CreateVulkanNew</c> returns.
+    /// </summary>
+    public static Exception? PendingInitializationError;
+
     // --- Swapchain state collected by hooks (keyed by SwapchainKHR.Handle) ---
     public static readonly ConcurrentDictionary<ulong, Image[]> SwapchainImages = new();
     public static readonly ConcurrentDictionary<ulong, uint> CurrentAcquiredIndex = new();
@@ -82,15 +92,33 @@ internal static unsafe class VkTrampolines
         "VK_KHR_get_memory_requirements2",
     };
 
-    private static readonly byte*[] _appendInstanceExtPtrs = AllocPinnedAsciiArray(AppendInstanceExtensions);
-    private static readonly byte*[] _appendDeviceExtPtrs   = AllocPinnedAsciiArray(AppendDeviceExtensions);
-
-    private static byte*[] AllocPinnedAsciiArray(string[] names)
+    /// <summary>
+    /// ASCII-encode <paramref name="names"/> into a caller-supplied byte buffer
+    /// and fill <paramref name="ptrs"/> with pointers into that buffer. Used by
+    /// the vkCreate* trampolines to materialize the appended-extension list on
+    /// the stack — no process-level <c>Marshal.AllocHGlobal</c> needed.
+    /// The buffer must be at least <see cref="AsciiByteCount"/> long.
+    /// </summary>
+    private static void EncodeAsciiNames(string[] names, byte* buf, byte** ptrs)
     {
-        var arr = new byte*[names.Length];
+        int offset = 0;
         for (int i = 0; i < names.Length; i++)
-            arr[i] = (byte*)Marshal.StringToHGlobalAnsi(names[i]);
-        return arr;
+        {
+            var name = names[i];
+            ptrs[i] = buf + offset;
+            for (int j = 0; j < name.Length; j++)
+                buf[offset + j] = (byte)name[j];
+            buf[offset + name.Length] = 0;
+            offset += name.Length + 1;
+        }
+    }
+
+    private static int AsciiByteCount(string[] names)
+    {
+        int total = 0;
+        for (int i = 0; i < names.Length; i++)
+            total += names[i].Length + 1;
+        return total;
     }
 
     // ============================================================================
@@ -102,10 +130,17 @@ internal static unsafe class VkTrampolines
         if (pCreateInfo == null || RealCreateInstance == null)
             return RealCreateInstance == null ? Result.ErrorInitializationFailed : RealCreateInstance(pCreateInfo, pAllocator, pInstance);
 
+        // Materialize ASCII extension names on the stack — valid for the duration of
+        // this trampoline, which is exactly the lifetime vkCreateInstance requires.
+        byte* nameBuf = stackalloc byte[AsciiByteCount(AppendInstanceExtensions)];
+        byte** appendPtrs = stackalloc byte*[AppendInstanceExtensions.Length];
+        EncodeAsciiNames(AppendInstanceExtensions, nameBuf, appendPtrs);
+
         var augmented = AugmentExtensions(
             origCount: pCreateInfo->EnabledExtensionCount,
             origPtrs: pCreateInfo->PpEnabledExtensionNames,
-            appendPtrs: _appendInstanceExtPtrs,
+            appendPtrs: appendPtrs,
+            appendCount: AppendInstanceExtensions.Length,
             out var newCount,
             out var newPtrs);
 
@@ -129,10 +164,15 @@ internal static unsafe class VkTrampolines
         if (pCreateInfo == null || RealCreateDevice == null)
             return RealCreateDevice == null ? Result.ErrorInitializationFailed : RealCreateDevice(physicalDevice, pCreateInfo, pAllocator, pDevice);
 
+        byte* nameBuf = stackalloc byte[AsciiByteCount(AppendDeviceExtensions)];
+        byte** appendPtrs = stackalloc byte*[AppendDeviceExtensions.Length];
+        EncodeAsciiNames(AppendDeviceExtensions, nameBuf, appendPtrs);
+
         var augmented = AugmentExtensions(
             origCount: pCreateInfo->EnabledExtensionCount,
             origPtrs: pCreateInfo->PpEnabledExtensionNames,
-            appendPtrs: _appendDeviceExtPtrs,
+            appendPtrs: appendPtrs,
+            appendCount: AppendDeviceExtensions.Length,
             out var newCount,
             out var newPtrs);
 
@@ -178,7 +218,19 @@ internal static unsafe class VkTrampolines
         }
         else if (matchIdx < 0)
         {
-            TraceLog.Log($"[VkTrampolines] vkEnumeratePhysicalDevices: no device matched target LUID 0x{TargetAdapterLuid:X16} (have {count} devices)");
+            // No physical device matches the D3D adapter LUID — Impeller would otherwise
+            // run on a different GPU than D3D, which silently corrupts shared-texture
+            // interop (green/black frames, OUT_OF_DEVICE_MEMORY on import). Log here
+            // and stash an exception that ImpellerSharedHost will re-throw on the
+            // managed side once CreateVulkanNew returns — throwing directly from this
+            // [UnmanagedCallersOnly] frame would cross the Vulkan loader's C stack and
+            // is undefined behavior in .NET.
+            var msg = $"vkEnumeratePhysicalDevices: no device matched target LUID 0x{TargetAdapterLuid:X16} (have {count} devices)";
+            TraceLog.Log($"[VkTrampolines] {msg}");
+            PendingInitializationError ??= new InvalidOperationException(
+                $"NImpeller.Wpf: no Vulkan physical device matches D3D adapter LUID " +
+                $"0x{TargetAdapterLuid:X16}. D3D and Vulkan selected different GPUs, " +
+                $"so shared-texture interop cannot work. Available physical devices: {count}.");
         }
         return r;
     }
@@ -201,10 +253,11 @@ internal static unsafe class VkTrampolines
     // ============================================================================
     // Extension-array augmentation helper
     // ============================================================================
-    private static IntPtr AugmentExtensions(uint origCount, byte** origPtrs, byte*[] appendPtrs,
+    private static IntPtr AugmentExtensions(uint origCount, byte** origPtrs,
+        byte** appendPtrs, int appendCount,
         out uint newCount, out byte** newPtrs)
     {
-        int maxCount = (int)origCount + appendPtrs.Length;
+        int maxCount = (int)origCount + appendCount;
         IntPtr unmanaged = Marshal.AllocHGlobal(maxCount * sizeof(IntPtr));
         var combined = (byte**)unmanaged;
 
@@ -212,7 +265,7 @@ internal static unsafe class VkTrampolines
         for (uint i = 0; i < origCount; i++)
             combined[outCount++] = origPtrs[i];
 
-        for (int i = 0; i < appendPtrs.Length; i++)
+        for (int i = 0; i < appendCount; i++)
         {
             bool already = false;
             for (uint j = 0; j < origCount; j++)
@@ -360,6 +413,27 @@ internal static unsafe class VkTrampolines
         catch (Exception ex)
         {
             TraceLog.Log($"[VkTrampolines] vkQueuePresentKHR blit failed: {ex.Message}");
+
+            // M2 recovery: ensure ctx.Fence ends up in the SIGNALED state so the next
+            // frame's WaitForFences(prev) returns immediately instead of sitting on a
+            // 1-second timeout. Reset is legal on an already-unsignaled fence; the
+            // empty submit just signals it without enqueuing any GPU work.
+            // If the underlying device is genuinely lost (TDR), the recovery submit
+            // will fail the same way — we log and move on so subsequent frames keep
+            // failing fast rather than freezing the UI thread.
+            try
+            {
+                var fenceLocal = ctx.Fence;
+                ctx.Vk.ResetFences(ctx.Device, 1u, in fenceLocal);
+                lock (ctx.SharedQueueLock)
+                {
+                    ctx.Vk.QueueSubmit(ctx.Queue, 0u, null, fenceLocal);
+                }
+            }
+            catch (Exception recoveryEx)
+            {
+                TraceLog.Log($"[VkTrampolines] vkQueuePresentKHR fence recovery failed: {recoveryEx.Message}");
+            }
         }
 
         // Still call the real present (with no wait semaphores — those were consumed by DoBlit's submit)
@@ -470,9 +544,15 @@ internal static unsafe class VkTrampolines
         Check(vk.EndCommandBuffer(cmd), "vkEndCommandBuffer(blit)");
 
         var cmdLocal = cmd;
-        var waitStages = stackalloc PipelineStageFlags[(int)Math.Max(1u, waitSemaphoreCount)];
-        for (int i = 0; i < waitSemaphoreCount; i++)
-            waitStages[i] = PipelineStageFlags.TransferBit;
+        // pWaitDstStageMask is only read when waitSemaphoreCount > 0; leave it null otherwise.
+        PipelineStageFlags* waitStages = null;
+        if (waitSemaphoreCount > 0)
+        {
+            PipelineStageFlags* tmp = stackalloc PipelineStageFlags[(int)waitSemaphoreCount];
+            for (int i = 0; i < waitSemaphoreCount; i++)
+                tmp[i] = PipelineStageFlags.TransferBit;
+            waitStages = tmp;
+        }
 
         var submitInfo = new SubmitInfo(
             waitSemaphoreCount: waitSemaphoreCount,
@@ -481,10 +561,17 @@ internal static unsafe class VkTrampolines
             commandBufferCount: 1u,
             pCommandBuffers: &cmdLocal);
 
-        lock (ctx.QueueSubmitLock)
+        lock (ctx.SharedQueueLock)
         {
+            // Submit and return immediately — do NOT WaitForFences here. The next
+            // frame's DoBlit will WaitForFences(prev) at its top, which keeps the
+            // command buffer reuse invariant and forms a 1-frame CPU/GPU pipeline:
+            // the UI thread proceeds while the GPU is still blitting the previous
+            // frame. The D3D9 KMT shared texture has no explicit fence semantics
+            // with the WPF compositor, but compositor scheduling latency normally
+            // exceeds blit GPU time, so tearing is rare in practice. If tearing
+            // becomes visible, escalate to a D3D11 fence import (see code-review.md M1).
             Check(vk.QueueSubmit(queue, 1u, &submitInfo, fence), "vkQueueSubmit(blit)");
-            Check(vk.WaitForFences(device, 1u, in fenceLocal, true, 1_000_000_000ul), "vkWaitForFences(blit)");
         }
     }
 
