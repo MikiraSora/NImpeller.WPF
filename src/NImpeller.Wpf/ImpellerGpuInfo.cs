@@ -5,7 +5,7 @@ namespace NImpeller.Wpf;
 /// <summary>
 /// Snapshot of the Impeller + Vulkan + GPU environment the library is running on.
 /// Returned by <see cref="ImpellerSystemInfo.GpuInfo"/> after the first
-/// <see cref="ImpellerView.Start()"/> has initialized the shared context.
+/// <see cref="ImpellerView.InitializeRender()"/> has initialized the shared context.
 /// </summary>
 public sealed class ImpellerGpuInfo
 {

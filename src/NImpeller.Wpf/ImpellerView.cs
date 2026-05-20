@@ -22,9 +22,10 @@ namespace NImpeller.Wpf;
 /// <code>
 /// &lt;imp:ImpellerView x:Name="View1" Render="View1_OnRender"/&gt;
 /// </code>
-/// In code-behind, call <c>View1.Start()</c> (or <c>Start(new ImpellerViewSettings { ... })</c>)
-/// after <c>InitializeComponent()</c>. The <see cref="Render"/> event fires once per frame
-/// while the view is loaded and visible.
+/// In code-behind, call <c>View1.InitializeRender()</c> (or
+/// <c>InitializeRender(new ImpellerViewSettings { ... })</c>) after
+/// <c>InitializeComponent()</c>. With the default settings, the continuous render
+/// loop starts automatically.
 /// </summary>
 public sealed unsafe class ImpellerView : FrameworkElement, IDisposable
 {
@@ -35,7 +36,8 @@ public sealed unsafe class ImpellerView : FrameworkElement, IDisposable
     public event EventHandler? Ready;
 
     private ImpellerViewSettings _settings = new();
-    private bool _startRequested;
+    private bool _initializeRequested;
+    private bool _startLoopRequested;
     private bool _isStarted;
     private bool _isInitialized;
 
@@ -66,6 +68,7 @@ public sealed unsafe class ImpellerView : FrameworkElement, IDisposable
 
     // ---- Ticker subscription ----
     private ViewTicker.TickCallback? _tickCallback;
+    private bool _invalidateRequested;
     private bool _frameReadyFired;
 
     public bool IsStarted => _isStarted;
@@ -87,31 +90,31 @@ public sealed unsafe class ImpellerView : FrameworkElement, IDisposable
         SizeChanged += OnSizeChanged;
     }
 
-    /// <summary>Start the view with default settings.</summary>
-    public void Start() => Start(new ImpellerViewSettings());
+    /// <summary>Initialize the view with default settings.</summary>
+    public void InitializeRender() => InitializeRender(new ImpellerViewSettings());
 
     /// <summary>
-    /// Start the view with the given settings. Safe to call before or after the view is
+    /// Initialize the view with the given settings. Safe to call before or after the view is
     /// loaded — if called early, initialization is deferred until <c>Loaded</c>.
     ///
     /// <para><b>Settings lifetime model</b></para>
-    /// The first call (before <c>Initialize</c> runs) consumes every field of
+    /// The first initialization consumes every field of
     /// <paramref name="settings"/> to build GPU resources and the per-frame ticker.
-    /// Subsequent calls do <b>not</b> rebuild anything; they only re-evaluate the
-    /// ticker registration based on <see cref="ImpellerViewSettings.RenderContinuously"/>
+    /// Calling initialize more than once on the same view throws; use
+    /// <see cref="Start"/> and <see cref="Stop"/> to control the continuous render loop.
     /// (typical use: resume after <see cref="Stop"/>). If the view is already ticking,
     /// this method is a no-op for the ticker — call <see cref="Stop"/> first.
     ///
-    /// <para><b>Per-field effect on re-Start</b></para>
+    /// <para><b>Per-field effect</b></para>
     /// <list type="bullet">
     ///   <item><see cref="ImpellerViewSettings.EnableValidation"/> — process-wide and
-    ///     locked at the very first <c>Start</c> in the process (the underlying
+    ///     locked at the very first initialization in the process (the underlying
     ///     <c>ImpellerContext</c> is a singleton); later values are silently ignored.</item>
     ///   <item><see cref="ImpellerViewSettings.UseDeviceDpi"/> — the new value is stored
     ///     and will influence future <c>ComputePixelWidth/Height</c> calls (next resize
     ///     or DPI change), but does NOT immediately rebuild the existing swapchain /
     ///     shared texture. To apply at the GPU level, detach the view, wait for
-    ///     <c>Unloaded</c>, then re-attach with a fresh <c>Start</c>.</item>
+    ///     <c>Unloaded</c>, then re-attach and initialize again.</item>
     ///   <item><see cref="ImpellerViewSettings.LogicalSizeOverride"/> — read on the next
     ///     <c>MeasureOverride</c> pass; call <c>InvalidateMeasure</c> to apply sooner.</item>
     ///   <item><see cref="ImpellerViewSettings.RenderContinuously"/> — read here on
@@ -120,10 +123,16 @@ public sealed unsafe class ImpellerView : FrameworkElement, IDisposable
     ///     running until <see cref="Stop"/> is called.</item>
     /// </list>
     /// </summary>
-    public void Start(ImpellerViewSettings settings)
+    public void InitializeRender(ImpellerViewSettings settings)
     {
+        if (_isInitialized || _initializeRequested)
+            throw new InvalidOperationException(
+                "ImpellerView has already been initialized or scheduled for initialization. " +
+                "Call Start() / Stop() to control the continuous render loop; detach and re-attach the view to reinitialize with new settings.");
+
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
-        _startRequested = true;
+        _initializeRequested = true;
+        _startLoopRequested = _settings.RenderContinuously;
 
         if (IsLoaded && !_isInitialized)
         {
@@ -133,23 +142,48 @@ public sealed unsafe class ImpellerView : FrameworkElement, IDisposable
 
         // Already initialized but ticker was previously unregistered by Stop() —
         // re-register so the view resumes rendering without rebuilding GPU resources.
-        if (_isInitialized && _tickCallback == null && _settings.RenderContinuously)
-        {
-            RegisterToTicker();
-            _isStarted = true;
-        }
     }
 
-    /// <summary>Request a redraw. Only meaningful when <c>RenderContinuously = false</c>.</summary>
+    /// <summary>
+    /// Start the continuous render loop. If the view has not been initialized yet,
+    /// it is initialized with default settings and the loop starts when initialization
+    /// completes. Call <see cref="Stop"/> to pause the loop without releasing resources.
+    /// </summary>
+    public void Start()
+    {
+        _startLoopRequested = true;
+
+        if (!_isInitialized)
+        {
+            if (!_initializeRequested)
+            {
+                InitializeRender(new ImpellerViewSettings());
+            }
+            else if (IsLoaded)
+            {
+                Initialize();
+            }
+            return;
+        }
+
+        RegisterToTicker();
+        _isStarted = true;
+    }
+
+    /// <summary>Request a single redraw without starting the continuous render loop.</summary>
     public void InvalidateRender()
     {
         if (!_isInitialized) return;
-        Dispatcher.BeginInvoke(new Action(RenderOneFrame));
+        if (_invalidateRequested) return;
+
+        _invalidateRequested = true;
+        Dispatcher.BeginInvoke(RenderOneFrame);
     }
 
     /// <summary>Stop continuous rendering. Resources are kept; call <see cref="Start()"/> to resume.</summary>
     public void Stop()
     {
+        _startLoopRequested = false;
         UnregisterFromTicker();
         _isStarted = false;
     }
@@ -188,7 +222,7 @@ public sealed unsafe class ImpellerView : FrameworkElement, IDisposable
     // ============================================================
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
-        if (_startRequested && !_isInitialized)
+        if (_initializeRequested && !_isInitialized)
             Initialize();
     }
 
@@ -309,9 +343,9 @@ public sealed unsafe class ImpellerView : FrameworkElement, IDisposable
             // Per-view D3D resources (D3D9Ex + D3D11 device + shared texture)
             var hostWindow = Window.GetWindow(this)
                 ?? throw new InvalidOperationException(
-                    "ImpellerView must be hosted inside a Window before Start() is called. " +
+                    "ImpellerView must be hosted inside a Window before InitializeRender() is called. " +
                     "If the view lives in a Popup, custom PresentationSource, or has not yet " +
-                    "been added to a Window's visual tree, defer Start() until OnLoaded.");
+                    "been added to a Window's visual tree, defer InitializeRender() until OnLoaded.");
             _d3dResources = new D3DResources();
             _d3dResources.Initialize(new WindowInteropHelper(hostWindow).Handle);
             _d3dResources.CreateOrResizeRenderTarget(_pixelWidth, _pixelHeight);
@@ -334,10 +368,10 @@ public sealed unsafe class ImpellerView : FrameworkElement, IDisposable
 
             _stopwatch.Restart();
             _isInitialized = true;
-            _isStarted = true;
+            _isStarted = false;
 
-            if (_settings.RenderContinuously)
-                RegisterToTicker();
+            if (_startLoopRequested)
+                Start();
 
             InvalidateVisual();
         }
@@ -572,6 +606,7 @@ public sealed unsafe class ImpellerView : FrameworkElement, IDisposable
     {
         _resizeDebounce?.Stop();
         _resizeDebounce = null;
+        _invalidateRequested = false;
         UnregisterFromTicker();
         if (!_isInitialized) return;
         CleanupResources();
@@ -644,11 +679,10 @@ public sealed unsafe class ImpellerView : FrameworkElement, IDisposable
         _tickCallback = null;
     }
 
-    // ============================================================
-    // Per-frame render
-    // ============================================================
     private void RenderOneFrame()
     {
+        _invalidateRequested = false;
+
         if (!_isInitialized || _impellerSwapchain == null || _d3dImage == null) return;
         if (Visibility != Visibility.Visible) return;
         if (ActualWidth <= 0 || ActualHeight <= 0) return;

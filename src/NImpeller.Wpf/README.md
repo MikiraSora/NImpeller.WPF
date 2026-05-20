@@ -59,7 +59,8 @@ it is drawn by Impeller's Vulkan renderer.
   own swapchain + shared texture; they share the underlying `ImpellerContext`.
 - **DPI awareness** — render target is allocated in physical pixels; the WPF visual is mapped back to DIPs by
   the matching DPI on the `D3DImage`, so text and 1‑px strokes stay sharp on 125 %/150 %/200 % displays.
-- **Minimal API** — `Render` event + `Start()` / `Stop()` / `InvalidateRender()`. No dependency
+- **Minimal API** — `Render` event + `Start()` / `Stop()` / `InvalidateRender()`, with
+  `InitializeRender(settings)` available when custom settings are needed. No dependency
   properties, no MVVM ceremony.
 - **Continuous or on-demand rendering** — `RenderContinuously = true` (default) drives every WPF frame via a
   single shared `CompositionTarget.Rendering` subscription; `false` only redraws when you call
@@ -144,8 +145,8 @@ public partial class MainWindow : Window
         // Default settings — RenderContinuously = true, UseDeviceDpi = true.
         View.Start();
 
-        // Or with custom settings:
-        // View.Start(new ImpellerViewSettings {
+        // Or initialize with custom settings:
+        // View.InitializeRender(new ImpellerViewSettings {
         //     RenderContinuously = false,    // only render on InvalidateRender()
         //     UseDeviceDpi       = true,     // physical-pixel render target
         //     EnableValidation   = false,    // honored only by the first view in the process
@@ -208,14 +209,14 @@ public MainWindow()
 }
 ```
 
-The first `Start()` lazily creates a process-wide `ImpellerSharedHost`; subsequent views reuse it.
+The first `Start()` or `InitializeRender()` lazily creates a process-wide `ImpellerSharedHost`; subsequent views reuse it.
 
 ### 4. On-demand rendering
 
 For UI that doesn't need 60 fps:
 
 ```csharp
-View.Start(new ImpellerViewSettings { RenderContinuously = false });
+View.InitializeRender(new ImpellerViewSettings { RenderContinuously = false });
 
 // ...later, when your data changes:
 View.InvalidateRender();
@@ -229,8 +230,9 @@ public sealed class ImpellerView : FrameworkElement
     public event EventHandler<ImpellerRenderEventArgs>? Render;
     public event EventHandler? Ready; // fires once after the first successful frame
 
+    public void InitializeRender();
+    public void InitializeRender(ImpellerViewSettings settings);
     public void Start();
-    public void Start(ImpellerViewSettings settings);
     public void InvalidateRender();
     public void Stop();
 
@@ -310,7 +312,7 @@ detection, swapchain creation, or blit failures.
 
 ## How it works (short version)
 
-1. The first `ImpellerView.Start()` boots an `ImpellerSharedHost` that loads `vulkan-1.dll`, creates the
+1. The first `ImpellerView.Start()` or `ImpellerView.InitializeRender(settings)` boots an `ImpellerSharedHost` that loads `vulkan-1.dll`, creates the
    `ImpellerContext` (which internally creates a `VkInstance` + `VkDevice`), and caches everything.
 2. Before Impeller resolves any Vulkan function, our `VkProcInterceptor` is installed as the
    `vkGetInstanceProcAddr` callback Impeller asks for. For nine entry points
