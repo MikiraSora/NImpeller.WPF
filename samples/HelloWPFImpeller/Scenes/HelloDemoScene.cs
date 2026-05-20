@@ -18,12 +18,13 @@ internal static class HelloDemoScene
         float timeSeconds,
         int width,
         int height,
-        long frameNumber)
+        long frameNumber,
+        float dpiScale)
     {
         DrawBackground(builder, timeSeconds, width, height);
         DrawCentralPulse(builder, timeSeconds, width, height);
-        DrawOrbitingRectangles(builder, timeSeconds, width, height);
-        DrawTextOverlay(builder, typography, width, height, frameNumber);
+        DrawOrbitingRectangles(builder, timeSeconds, width, height, dpiScale);
+        DrawTextOverlay(builder, typography, width, height, frameNumber, dpiScale);
     }
 
     private static void DrawBackground(ImpellerDisplayListBuilder builder, float t, int w, int h)
@@ -59,13 +60,14 @@ internal static class HelloDemoScene
         builder.DrawOval(bounds, paint);
     }
 
-    private static void DrawOrbitingRectangles(ImpellerDisplayListBuilder builder, float t, int w, int h)
+    private static void DrawOrbitingRectangles(ImpellerDisplayListBuilder builder, float t, int w, int h, float dpiScale)
     {
         const int count = 8;
         float cx = w / 2f;
         float cy = h / 2f;
         float orbit = MathF.Min(w, h) * 0.32f;
-        float boxHalf = 28f;
+        float boxHalf = 28f * dpiScale;
+        float cornerR = 10f * dpiScale;
 
         using var paint = ImpellerPaint.New()!;
 
@@ -87,7 +89,7 @@ internal static class HelloDemoScene
             builder.Rotate(spinAngleDeg);
 
             var rect = new ImpellerRect(-(int)boxHalf, -(int)boxHalf, (int)(boxHalf * 2), (int)(boxHalf * 2));
-            var corner = new ImpellerPoint { X = 10, Y = 10 };
+            var corner = new ImpellerPoint { X = cornerR, Y = cornerR };
             var radii = new ImpellerRoundingRadii
             {
                 Top_left = corner,
@@ -103,30 +105,34 @@ internal static class HelloDemoScene
     private static void DrawTextOverlay(
         ImpellerDisplayListBuilder builder,
         ImpellerTypographyContext? typography,
-        int width, int height, long frameNumber)
+        int width, int height, long frameNumber, float dpiScale)
     {
         if (typography == null) return;
 
         DrawCenteredText(builder, typography,
             "Hello WPF + Impeller",
-            yTop: 24, fontSize: 28, width: width,
-            color: ImpellerColor.FromRgb(255, 255, 255));
+            yTop: 28f * dpiScale, fontSize: 32f * dpiScale, width: width,
+            color: ImpellerColor.FromRgb(255, 255, 255),
+            weight: ImpellerFontWeight.kImpellerFontWeight600);
 
         DrawCenteredText(builder, typography,
             "Vulkan backend  →  shared VkImage  →  D3DImage",
-            yTop: 64, fontSize: 14, width: width,
-            color: ImpellerColor.FromRgb(190, 200, 255));
+            yTop: 76f * dpiScale, fontSize: 18f * dpiScale, width: width,
+            color: ImpellerColor.FromRgb(210, 220, 255),
+            weight: ImpellerFontWeight.kImpellerFontWeight500);
 
         DrawCenteredText(builder, typography,
             $"frame {frameNumber}",
-            yTop: height - 32, fontSize: 12, width: width,
-            color: ImpellerColor.FromRgb(160, 160, 160));
+            yTop: height - 36f * dpiScale, fontSize: 16f * dpiScale, width: width,
+            color: ImpellerColor.FromRgb(190, 190, 190),
+            weight: ImpellerFontWeight.kImpellerFontWeight500);
     }
 
     private static void DrawCenteredText(
         ImpellerDisplayListBuilder builder,
         ImpellerTypographyContext typography,
-        string text, float yTop, float fontSize, int width, ImpellerColor color)
+        string text, float yTop, float fontSize, int width, ImpellerColor color,
+        ImpellerFontWeight weight = ImpellerFontWeight.kImpellerFontWeight400)
     {
         using var paragraphBuilder = typography.ParagraphBuilderNew();
         if (paragraphBuilder == null) return;
@@ -137,7 +143,12 @@ internal static class HelloDemoScene
 
         paint.SetColor(color);
         style.SetForeground(paint);
-        style.SetFontSize(fontSize);
+        // Snap font size to integer pixels so glyph metrics are not subpixel-fractional.
+        style.SetFontSize(MathF.Round(fontSize));
+        style.SetFontWeight(weight);
+        // Height=1.0 removes the default line-height multiplier that adds vertical padding
+        // and can push baselines to fractional pixel positions.
+        style.SetHeight(1.0f);
         style.SetTextAlignment(ImpellerTextAlignment.kImpellerTextAlignmentCenter);
 
         paragraphBuilder.PushStyle(style);
@@ -145,7 +156,8 @@ internal static class HelloDemoScene
 
         using var paragraph = paragraphBuilder.BuildParagraphNew(width: width);
         if (paragraph == null) return;
-        builder.DrawParagraph(paragraph, new ImpellerPoint { X = 0, Y = (int)yTop });
+        // Snap Y to integer pixel to avoid subpixel vertical positioning.
+        builder.DrawParagraph(paragraph, new ImpellerPoint { X = 0, Y = MathF.Round(yTop) });
     }
 
     private static (float r, float g, float b) HsvToRgb(float h, float s, float v)

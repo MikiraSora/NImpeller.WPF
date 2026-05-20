@@ -16,6 +16,8 @@ namespace HelloWPFImpeller;
 
 public partial class MainWindow : Window
 {
+    private const string WindowTitleBase = "HelloWPFImpeller";
+
     private readonly D3DResources _d3dResources = new();
     private readonly Stopwatch _stopwatch = Stopwatch.StartNew();
     private TimeSpan _lastRenderTime = TimeSpan.MinValue;
@@ -30,30 +32,57 @@ public partial class MainWindow : Window
     private KhrSurface? _khrSurface;
     private ImpellerTypographyContext? _typography;
 
+    // DPI / pixel scale
+    private double _dpiScaleX = 1.0;
+    private double _dpiScaleY = 1.0;
+    private D3DImage? _d3dImage;
+
+    // FPS tracking
+    private int _frameCountThisSecond;
+    private double _lastFpsUpdateSec;
+    private float _displayFps;
+
     public MainWindow()
     {
         InitializeComponent();
+        Title = WindowTitleBase;
         Loaded += OnLoaded;
         Closed += OnClosed;
     }
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
+        // ---- DPI detection ----
+        var src = PresentationSource.FromVisual(this);
+        if (src?.CompositionTarget != null)
+        {
+            var m = src.CompositionTarget.TransformToDevice;
+            _dpiScaleX = m.M11;
+            _dpiScaleY = m.M22;
+        }
+        App.Log($"[DPI] scale = {_dpiScaleX:0.###} x {_dpiScaleY:0.###}");
+
+        // ---- D3DImage with matching DPI (so PixelWidth=physical px maps 1:1) ----
+        _d3dImage = new D3DImage(96.0 * _dpiScaleX, 96.0 * _dpiScaleY);
+        OutputImage.Source = _d3dImage;
+
+        // ---- D3D shared texture sized in PHYSICAL pixels ----
         var hwnd = new WindowInteropHelper(this).Handle;
         _d3dResources.Initialize(hwnd);
         App.Log($"[D3D] Adapter LUID = {_d3dResources.AdapterLuid.High:X8}:{_d3dResources.AdapterLuid.Low:X8}");
 
-        // Internal render resolution is fixed at the initial window size. The Image
-        // control's Stretch="Fill" lets the result scale visually if the user resizes
-        // the WPF window, without us having to tear down and rebuild the entire
-        // Vulkan + D3D + Impeller swapchain stack on every resize event.
-        var initialWidth = Math.Max(1, (uint)Math.Round(ActualWidth));
-        var initialHeight = Math.Max(1, (uint)Math.Round(ActualHeight));
-        _d3dResources.CreateOrResizeRenderTarget(initialWidth, initialHeight);
+        // Use the actual rendered area of the Image control (which is the WPF client area),
+        // not the Window's outer ActualWidth/Height which includes title bar + borders.
+        double dipW = OutputImage.ActualWidth > 0 ? OutputImage.ActualWidth : ActualWidth;
+        double dipH = OutputImage.ActualHeight > 0 ? OutputImage.ActualHeight : ActualHeight;
+        var pxW = Math.Max(1, (uint)Math.Round(dipW * _dpiScaleX));
+        var pxH = Math.Max(1, (uint)Math.Round(dipH * _dpiScaleY));
+        App.Log($"[D3D] Render target = {pxW}x{pxH} physical px (OutputImage {dipW}x{dipH} DIP, Window {ActualWidth}x{ActualHeight} DIP)");
+        _d3dResources.CreateOrResizeRenderTarget(pxW, pxH);
 
-        D3DImage.Lock();
-        D3DImage.SetBackBuffer(D3DResourceType.IDirect3DSurface9, _d3dResources.BackbufferSurfaceHandle);
-        D3DImage.Unlock();
+        _d3dImage.Lock();
+        _d3dImage.SetBackBuffer(D3DResourceType.IDirect3DSurface9, _d3dResources.BackbufferSurfaceHandle);
+        _d3dImage.Unlock();
 
         InitializeImpeller();
 
@@ -72,7 +101,6 @@ public partial class MainWindow : Window
             return;
         }
 
-        // Tell the LUID-reorder trampoline which adapter to prefer.
         VkTrampolines.TargetAdapterLuid = ((ulong)(uint)_d3dResources.AdapterLuid.High << 32)
                                           | (ulong)(uint)_d3dResources.AdapterLuid.Low;
         App.Log($"[Impeller] Target adapter LUID = 0x{VkTrampolines.TargetAdapterLuid:X16}");
@@ -101,10 +129,6 @@ public partial class MainWindow : Window
         App.Log($"  VkDevice         = 0x{(long)info.Value.Vk_logical_device:X16}");
         App.Log($"  QueueFamilyIndex = {info.Value.Graphics_queue_family_index}");
         App.Log($"  QueueIndex       = {info.Value.Graphics_queue_index}");
-
-        App.Log("[Impeller] Observed hookable functions requested by Impeller:");
-        foreach (var name in VkProcInterceptor.ObservedHookableFunctions)
-            App.Log($"    - {name}");
 
         InitializeSharedVulkanImage(info.Value);
     }
@@ -173,7 +197,6 @@ public partial class MainWindow : Window
         if (_typography == null)
             App.Log("[Impeller] WARNING: TypographyContext.New returned null; text overlay disabled.");
 
-        // Install the blit-on-present hook resources now that we know the queue + target image.
         var device = new Device(info.Vk_logical_device);
         _vk!.GetDeviceQueue(device, info.Graphics_queue_family_index, info.Graphics_queue_index, out var queue);
         VkTrampolines.InstallBlitResources(
@@ -182,25 +205,18 @@ public partial class MainWindow : Window
             new Extent2D(_d3dResources.Width, _d3dResources.Height));
     }
 
-    private void OnSizeChanged(object sender, SizeChangedEventArgs e)
-    {
-        // Render resolution is deliberately fixed at startup; WPF's Image.Stretch=Fill
-        // scales the result visually. See OnLoaded for the rationale.
-    }
-
-    private bool _firstVulkanClearLogged;
     private bool _firstImpellerFrameLogged;
     private long _frameNumber;
 
     private void OnRendering(object? sender, EventArgs e)
     {
-        if (!D3DImage.IsFrontBufferAvailable) return;
+        if (_d3dImage == null || !_d3dImage.IsFrontBufferAvailable) return;
 
         var args = (RenderingEventArgs)e;
         if (_lastRenderTime == args.RenderingTime) return;
         _lastRenderTime = args.RenderingTime;
 
-        D3DImage.Lock();
+        _d3dImage.Lock();
         try
         {
             if (_impellerSwapchain != null)
@@ -216,18 +232,12 @@ public partial class MainWindow : Window
                     0.5f + 0.5f * MathF.Sin(t * 0.9f + 1.0f),
                     0.5f + 0.5f * MathF.Sin(t * 1.5f + 2.0f),
                     1.0f);
-                if (!_firstVulkanClearLogged)
-                {
-                    _firstVulkanClearLogged = true;
-                    App.Log("[Render] First Vulkan ClearColorImage submitted + waited successfully.");
-                }
             }
             else
             {
-                // Last-resort fallback: D3D9 ColorFill (no Vulkan at all).
                 _d3dResources.ClearForDebug(0x40, 0x40, 0x40);
             }
-            D3DImage.AddDirtyRect(new Int32Rect(0, 0, D3DImage.PixelWidth, D3DImage.PixelHeight));
+            _d3dImage.AddDirtyRect(new Int32Rect(0, 0, _d3dImage.PixelWidth, _d3dImage.PixelHeight));
         }
         catch (Exception ex)
         {
@@ -239,7 +249,22 @@ public partial class MainWindow : Window
         }
         finally
         {
-            D3DImage.Unlock();
+            _d3dImage.Unlock();
+        }
+
+        UpdateFps();
+    }
+
+    private void UpdateFps()
+    {
+        _frameCountThisSecond++;
+        double now = _stopwatch.Elapsed.TotalSeconds;
+        if (now - _lastFpsUpdateSec >= 1.0)
+        {
+            _displayFps = MathF.Round(_frameCountThisSecond / (float)(now - _lastFpsUpdateSec));
+            _frameCountThisSecond = 0;
+            _lastFpsUpdateSec = now;
+            Title = $"{WindowTitleBase} — {_displayFps:F2} fps @ {_d3dResources.Width}x{_d3dResources.Height} (DPI {_dpiScaleX:0.##}x)";
         }
     }
 
@@ -253,7 +278,9 @@ public partial class MainWindow : Window
                             ?? throw new InvalidOperationException("ImpellerDisplayListBuilder.New returned null");
 
         var t = (float)_stopwatch.Elapsed.TotalSeconds;
-        HelloDemoScene.Render(builder, _typography, t, w, h, ++_frameNumber);
+        // Scene receives PHYSICAL pixel dimensions and the DPI scale so font sizes and
+        // stroke widths can be multiplied to keep visual size constant across DPIs.
+        HelloDemoScene.Render(builder, _typography, t, w, h, ++_frameNumber, (float)_dpiScaleX);
 
         using var displayList = builder.CreateDisplayListNew()
                                 ?? throw new InvalidOperationException("CreateDisplayListNew returned null");
@@ -261,7 +288,7 @@ public partial class MainWindow : Window
         using var surface = _impellerSwapchain!.AcquireNextSurfaceNew()
                             ?? throw new InvalidOperationException("AcquireNextSurfaceNew returned null");
         surface.DrawDisplayList(displayList);
-        surface.Present();  // -> our QueuePresentKHR trampoline blits into the shared texture
+        surface.Present();
 
         if (!_firstImpellerFrameLogged)
         {
@@ -274,16 +301,12 @@ public partial class MainWindow : Window
     {
         CompositionTarget.Rendering -= OnRendering;
 
-        // Make sure the GPU is no longer using anything we are about to destroy.
         if (_vk != null && _impellerVulkanInfo.HasValue)
         {
             try { _vk.DeviceWaitIdle(new Device(_impellerVulkanInfo.Value.Vk_logical_device)); }
             catch (Exception ex) { App.Log($"[Closed] vkDeviceWaitIdle threw: {ex.Message}"); }
         }
 
-        // Order matters: tear down swapchain (and its dependent blit cmd resources)
-        // before the shared image, which the blit references; the Impeller context
-        // and D3D resources can go last.
         _typography?.Dispose();
         _typography = null;
         _impellerSwapchain?.Dispose();

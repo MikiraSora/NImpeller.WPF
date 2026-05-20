@@ -6,10 +6,13 @@
         Width="1280" Height="720"
         Background="#202020">
     <Grid>
-        <Image Stretch="Fill" RenderOptions.BitmapScalingMode="HighQuality">
-            <Image.Source>
-                <interop:D3DImage x:Name="D3DImage" />
-            </Image.Source>
-        </Image>
+        <Image x:Name="OutputImage"
+               Stretch="None"
+               HorizontalAlignment="Stretch"
+               VerticalAlignment="Stretch"
+               UseLayoutRounding="True"
+               SnapsToDevicePixels="True"
+               RenderOptions.BitmapScalingMode="NearestNeighbor"
+               RenderOptions.EdgeMode="Aliased" />
     </Grid>
 </Window>
