@@ -344,6 +344,14 @@ detection, swapchain creation, or blit failures.
 
 ---
 
+## Screenshoots
+
+<img width="1266" height="713" alt="image" src="https://github.com/user-attachments/assets/b6c4a81e-76b8-45dc-892c-75e26be7edea" />
+
+<img width="1280" height="800" alt="image" src="https://github.com/user-attachments/assets/100f4af7-3e20-46a1-a7c3-400a837f6a43" />
+
+---
+
 ## License
 
 Same as the parent NImpeller repository.
