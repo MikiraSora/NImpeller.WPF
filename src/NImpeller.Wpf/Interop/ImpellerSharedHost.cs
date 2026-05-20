@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.InteropServices;
 using System.Threading;
 
 using NImpeller;
@@ -155,9 +156,103 @@ internal sealed unsafe class ImpellerSharedHost
 
         // 7) Ensure clean shutdown on process exit (idempotent w.r.t. explicit Shutdown())
         AppDomain.CurrentDomain.ProcessExit += (_, _) => Shutdown();
+
+        // 8) Cache a snapshot of GPU + Vulkan + Impeller info for diagnostic UIs.
+        CachedGpuInfo = QueryGpuInfo();
     }
 
-    [System.Runtime.InteropServices.DllImport("kernel32")]
+    // ---------------- GPU info ----------------
+    public static ImpellerGpuInfo? CachedGpuInfo { get; private set; }
+
+    [DllImport("impeller", EntryPoint = "ImpellerGetVersion", CallingConvention = CallingConvention.StdCall)]
+    private static extern uint ImpellerGetVersion();
+
+    private ImpellerGpuInfo QueryGpuInfo()
+    {
+        // Vulkan device properties
+        Vk.GetPhysicalDeviceProperties(VkPhysicalDevice, out var props);
+        Vk.GetPhysicalDeviceMemoryProperties(VkPhysicalDevice, out var memProps);
+
+        // Device name is a fixed byte[256] UTF-8 buffer; convert with a manual scan.
+        string deviceName;
+        unsafe
+        {
+            int len = 0;
+            while (len < 256 && props.DeviceName[len] != 0) len++;
+            deviceName = System.Text.Encoding.UTF8.GetString(props.DeviceName, len);
+        }
+
+        ulong devLocal = 0, hostVis = 0;
+        unsafe
+        {
+            for (int i = 0; i < memProps.MemoryHeapCount; i++)
+            {
+                var heap = memProps.MemoryHeaps[i];
+                if ((heap.Flags & MemoryHeapFlags.DeviceLocalBit) != 0)
+                    devLocal += heap.Size;
+            }
+            for (int i = 0; i < memProps.MemoryTypeCount; i++)
+            {
+                var mt = memProps.MemoryTypes[i];
+                if ((mt.PropertyFlags & MemoryPropertyFlags.HostVisibleBit) != 0)
+                {
+                    if (mt.HeapIndex < memProps.MemoryHeapCount)
+                        hostVis = Math.Max(hostVis, memProps.MemoryHeaps[(int)mt.HeapIndex].Size);
+                }
+            }
+        }
+
+        uint impellerVer = 0;
+        try { impellerVer = ImpellerGetVersion(); }
+        catch (Exception ex) { TraceLog.Log($"[ImpellerSharedHost] ImpellerGetVersion threw: {ex.Message}"); }
+
+        return new ImpellerGpuInfo
+        {
+            ImpellerApiVersionRaw = impellerVer,
+            ImpellerApiVersion = DecodeImpellerVersion(impellerVer),
+            VulkanApiVersionRaw = props.ApiVersion,
+            VulkanApiVersion = DecodeVulkanVersion(props.ApiVersion),
+            DriverVersionRaw = props.DriverVersion,
+            VendorId = props.VendorID,
+            VendorName = VendorName(props.VendorID),
+            DeviceId = props.DeviceID,
+            DeviceName = deviceName,
+            DeviceType = props.DeviceType.ToString().Replace("PhysicalDeviceType", ""),
+            AdapterLuid = VkTrampolines.TargetAdapterLuid,
+            QueueFamilyIndex = QueueFamilyIndex,
+            QueueIndex = VulkanInfo.Graphics_queue_index,
+            DeviceLocalMemoryBytes = devLocal,
+            HostVisibleMemoryBytes = hostVis,
+            MaxImageDimension2D = props.Limits.MaxImageDimension2D,
+            MaxFramebufferWidth = props.Limits.MaxFramebufferWidth,
+            MaxFramebufferHeight = props.Limits.MaxFramebufferHeight,
+            VkInstance = VulkanInfo.Vk_instance,
+            VkPhysicalDevice = VulkanInfo.Vk_physical_device,
+            VkDevice = VulkanInfo.Vk_logical_device,
+            VkQueue = (IntPtr)VkQueue.Handle,
+        };
+    }
+
+    private static string DecodeVulkanVersion(uint v) =>
+        $"{(v >> 22) & 0x7F}.{(v >> 12) & 0x3FF}.{v & 0xFFF}";
+
+    private static string DecodeImpellerVersion(uint v) =>
+        // Impeller uses ImpellerMakeVersion(variant, major, minor, patch) — same layout as Vulkan
+        // (variant<<29 | major<<22 | minor<<12 | patch). Show major.minor.patch.
+        $"{(v >> 22) & 0x7F}.{(v >> 12) & 0x3FF}.{v & 0xFFF}";
+
+    private static string VendorName(uint vendorId) => vendorId switch
+    {
+        0x1002 => "AMD",
+        0x1010 => "ImgTec",
+        0x10DE => "NVIDIA",
+        0x13B5 => "ARM",
+        0x5143 => "Qualcomm",
+        0x8086 => "Intel",
+        _      => $"0x{vendorId:X4}",
+    };
+
+    [DllImport("kernel32")]
     private static extern IntPtr GetModuleHandleW(string? lpModuleName);
 
     private void DisposeAll()

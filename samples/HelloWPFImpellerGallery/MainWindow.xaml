@@ -7,7 +7,6 @@
         Width="1280" Height="800"
         Background="#1A1D22">
     <Window.Resources>
-        <!-- Scene list item template: bold name + dim description -->
         <DataTemplate x:Key="SceneItemTemplate" DataType="{x:Type scenes:IGalleryScene}">
             <StackPanel Margin="6,4">
                 <TextBlock Text="{Binding Name}"
@@ -17,6 +16,41 @@
                            TextWrapping="Wrap" Margin="0,2,0,0"/>
             </StackPanel>
         </DataTemplate>
+
+        <Style x:Key="CountButtonStyle" TargetType="Button">
+            <Setter Property="Width" Value="40"/>
+            <Setter Property="Height" Value="32"/>
+            <Setter Property="FontSize" Value="18"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Background" Value="#2D3340"/>
+            <Setter Property="Foreground" Value="#FFFFFF"/>
+            <Setter Property="BorderBrush" Value="#445064"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="6">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#3A5A8C"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#2A4A7C"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.4"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
 
     <Grid>
@@ -58,8 +92,44 @@
             </DockPanel>
         </Border>
 
-        <!-- RIGHT: Impeller render surface -->
-        <imp:ImpellerView x:Name="GalleryView" Grid.Column="1"
-                          Render="GalleryView_OnRender"/>
+        <!-- RIGHT: Impeller render surface + overlay controls -->
+        <Grid Grid.Column="1">
+            <imp:ImpellerView x:Name="GalleryView" Render="GalleryView_OnRender"/>
+
+            <!-- Top-right overlay: count controls for IConfigurableScene -->
+            <Border x:Name="CountControls"
+                    HorizontalAlignment="Right" VerticalAlignment="Top"
+                    Margin="0,12,12,0"
+                    Background="#CC1F2530" CornerRadius="8"
+                    BorderBrush="#445064" BorderThickness="1"
+                    Padding="10,8"
+                    Visibility="Collapsed">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock x:Name="CountLabel"
+                               Foreground="#E8E8E8" FontSize="13"
+                               VerticalAlignment="Center"
+                               Margin="0,0,12,0"
+                               Text="items: 0"/>
+                    <Button Content="−" Style="{StaticResource CountButtonStyle}"
+                            Click="OnDecrementClick" Margin="0,0,4,0"
+                            ToolTip="Decrease item count by one step"/>
+                    <Button Content="+" Style="{StaticResource CountButtonStyle}"
+                            Click="OnIncrementClick" Margin="0,0,4,0"
+                            ToolTip="Increase item count by one step"/>
+                    <Button Content="−−" Style="{StaticResource CountButtonStyle}"
+                            Click="OnDecrementBigClick" Margin="0,0,4,0"
+                            ToolTip="Decrease by 5× step"/>
+                    <Button Content="++" Style="{StaticResource CountButtonStyle}"
+                            Click="OnIncrementBigClick" Margin="0,0,4,0"
+                            ToolTip="Increase by 5× step"/>
+                    <Button Content="0" Style="{StaticResource CountButtonStyle}"
+                            Click="OnZeroClick" Margin="0,0,4,0"
+                            ToolTip="Set to minimum"/>
+                    <Button Content="↺" Style="{StaticResource CountButtonStyle}"
+                            Click="OnResetClick"
+                            ToolTip="Reset to default"/>
+                </StackPanel>
+            </Border>
+        </Grid>
     </Grid>
 </Window>

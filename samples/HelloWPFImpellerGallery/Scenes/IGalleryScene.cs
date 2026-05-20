@@ -21,3 +21,25 @@ public interface IGalleryScene
     /// </summary>
     void Render(ImpellerRenderEventArgs e);
 }
+
+/// <summary>
+/// Optional capability: a scene that exposes a single numeric "how many items to draw"
+/// knob. The main window surfaces this as a +/- button pair while the scene is selected.
+/// </summary>
+public interface IConfigurableScene : IGalleryScene
+{
+    /// <summary>Current number of items the scene will draw next frame.</summary>
+    int ItemCount { get; set; }
+
+    /// <summary>Increment applied by the +/- buttons (clamped to Min/Max).</summary>
+    int ItemStep { get; }
+
+    /// <summary>Lower bound for <see cref="ItemCount"/>.</summary>
+    int ItemMin { get; }
+
+    /// <summary>Upper bound for <see cref="ItemCount"/>.</summary>
+    int ItemMax { get; }
+
+    /// <summary>Optional unit suffix shown next to the count, e.g. "rects", "paths".</summary>
+    string ItemLabel { get; }
+}
