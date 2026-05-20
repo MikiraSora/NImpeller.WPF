@@ -1,7 +1,7 @@
 using System;
 using System.Runtime.InteropServices;
 
-namespace HelloWPFImpeller.Interop;
+namespace NImpeller.Wpf.Interop;
 
 /// <summary>
 /// A 1×1 invisible top-level window used purely to obtain a VkSurfaceKHR
@@ -9,13 +9,16 @@ namespace HelloWPFImpeller.Interop;
 /// VkSurfaceKHR to create its swapchain; we never present to this window —
 /// vkQueuePresentKHR is hooked and turned into a blit into the shared
 /// D3D-Vulkan texture instead.
+///
+/// Multiple <c>VkSurfaceKHR</c> instances may be created from the same HWND,
+/// which is why the library keeps a single shared instance of this window in
+/// <see cref="ImpellerSharedHost"/> rather than one per ImpellerView.
 /// </summary>
 internal sealed class HiddenVulkanWindow : IDisposable
 {
-    private const string ClassName = "HelloWPFImpellerHiddenVk";
+    private const string ClassName = "NImpellerWpfHiddenVk";
     private const uint WS_POPUP = 0x80000000;
     private const uint WS_EX_TOOLWINDOW = 0x00000080;
-    private const int  HWND_MESSAGE = -3;
     private const uint CS_OWNDC = 0x0020;
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -49,6 +52,14 @@ internal sealed class HiddenVulkanWindow : IDisposable
 
     [DllImport("user32")]
     private static extern IntPtr DefWindowProcW(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32")]
+    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+
+    private const uint SWP_NOMOVE = 0x0002;
+    private const uint SWP_NOZORDER = 0x0004;
+    private const uint SWP_NOACTIVATE = 0x0010;
+    private const uint SWP_NOREDRAW = 0x0008;
 
     [DllImport("kernel32")]
     private static extern IntPtr GetModuleHandleW(string? lpModuleName);
@@ -93,14 +104,14 @@ internal sealed class HiddenVulkanWindow : IDisposable
         }
 
         _hwnd = CreateWindowExW(
-            WS_EX_TOOLWINDOW, ClassName, "HelloWPFImpellerHiddenVk", WS_POPUP,
+            WS_EX_TOOLWINDOW, ClassName, "NImpellerWpfHiddenVk", WS_POPUP,
             -32000, -32000, Math.Max(1, width), Math.Max(1, height),
             IntPtr.Zero, IntPtr.Zero, _hinstance, IntPtr.Zero);
 
         if (_hwnd == IntPtr.Zero)
             throw new InvalidOperationException($"CreateWindowExW failed (err={Marshal.GetLastWin32Error()})");
 
-        App.Log($"[HiddenVulkanWindow] HWND = 0x{(long)_hwnd:X16} size={width}x{height}");
+        TraceLog.Log($"[HiddenVulkanWindow] HWND = 0x{(long)_hwnd:X16} size={width}x{height}");
     }
 
     public void Dispose()
@@ -110,5 +121,13 @@ internal sealed class HiddenVulkanWindow : IDisposable
             DestroyWindow(_hwnd);
             _hwnd = IntPtr.Zero;
         }
+    }
+
+    /// <summary>Resize the underlying HWND so vkGetPhysicalDeviceSurfaceCapabilitiesKHR reports the new currentExtent.</summary>
+    public void Resize(int width, int height)
+    {
+        if (_hwnd == IntPtr.Zero) return;
+        SetWindowPos(_hwnd, IntPtr.Zero, 0, 0, Math.Max(1, width), Math.Max(1, height),
+            SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
     }
 }

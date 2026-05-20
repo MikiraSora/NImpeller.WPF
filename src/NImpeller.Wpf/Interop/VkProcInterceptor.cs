@@ -4,7 +4,7 @@ using System.Runtime.InteropServices;
 
 using Silk.NET.Vulkan;
 
-namespace HelloWPFImpeller.Interop;
+namespace NImpeller.Wpf.Interop;
 
 /// <summary>
 /// Vulkan proc-address interceptor. Sits between Impeller and the real Vulkan loader.
@@ -52,7 +52,7 @@ internal static unsafe class VkProcInterceptor
             case "vkGetPhysicalDeviceProperties2KHR":
                 VkTrampolines.RealGetPhysicalDeviceProperties2 =
                     (delegate* unmanaged[Cdecl]<PhysicalDevice, PhysicalDeviceProperties2*, void>)realPtr;
-                return realPtr; // passthrough; we only cache it for our own use
+                return realPtr;
 
             case "vkGetPhysicalDeviceSurfaceCapabilitiesKHR":
                 VkTrampolines.RealGetPhysicalDeviceSurfaceCapabilitiesKHR =
@@ -87,7 +87,7 @@ internal static unsafe class VkProcInterceptor
     private static IntPtr MarkHooked(string name, IntPtr trampoline)
     {
         HookedFunctions.Add(name);
-        App.Log($"[VkProcInterceptor] installed trampoline for {name}");
+        TraceLog.Log($"[VkProcInterceptor] installed trampoline for {name}");
         return trampoline;
     }
 
@@ -95,20 +95,19 @@ internal static unsafe class VkProcInterceptor
     {
         if (VkTrampolines.RealGetPhysicalDeviceProperties2 != null) return;
 
-        // Try Vulkan 1.1 core first
         var p = LookupReal(vkInstance, "vkGetPhysicalDeviceProperties2");
         if (p == IntPtr.Zero)
-            p = LookupReal(vkInstance, "vkGetPhysicalDeviceProperties2KHR"); // Vulkan 1.0 + KHR extension
+            p = LookupReal(vkInstance, "vkGetPhysicalDeviceProperties2KHR");
 
         if (p != IntPtr.Zero)
         {
             VkTrampolines.RealGetPhysicalDeviceProperties2 =
                 (delegate* unmanaged[Cdecl]<PhysicalDevice, PhysicalDeviceProperties2*, void>)p;
-            App.Log($"[VkProcInterceptor] pre-loaded vkGetPhysicalDeviceProperties2 for LUID matching");
+            TraceLog.Log("[VkProcInterceptor] pre-loaded vkGetPhysicalDeviceProperties2 for LUID matching");
         }
         else
         {
-            App.Log($"[VkProcInterceptor] WARNING: vkGetPhysicalDeviceProperties2 unavailable; LUID reorder disabled");
+            TraceLog.Log("[VkProcInterceptor] WARNING: vkGetPhysicalDeviceProperties2 unavailable; LUID reorder disabled");
         }
     }
 

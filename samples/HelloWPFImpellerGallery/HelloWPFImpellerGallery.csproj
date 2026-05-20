@@ -8,8 +8,8 @@
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Platforms>x64</Platforms>
-    <RootNamespace>HelloWPFImpeller</RootNamespace>
-    <AssemblyName>HelloWPFImpeller</AssemblyName>
+    <RootNamespace>HelloWPFImpellerGallery</RootNamespace>
+    <AssemblyName>HelloWPFImpellerGallery</AssemblyName>
   </PropertyGroup>
 
   <ItemGroup>

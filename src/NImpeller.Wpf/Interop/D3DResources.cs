@@ -1,16 +1,14 @@
 using System;
-using System.Runtime.InteropServices;
-using System.Windows.Interop;
 
 using Silk.NET.Core.Native;
 using Silk.NET.Direct3D11;
 using Silk.NET.Direct3D9;
 using Silk.NET.DXGI;
 
-namespace HelloWPFImpeller.Interop;
+namespace NImpeller.Wpf.Interop;
 
 /// <summary>
-/// Manages the D3D9Ex device, D3D11 device, and the shared render-target texture
+/// Manages a D3D9Ex device, a D3D11 device, and a shared render-target texture
 /// that bridges Vulkan (Impeller's swapchain image, blitted into it) and
 /// WPF's D3DImage (which receives the D3D9 surface view of the same memory).
 ///
@@ -22,6 +20,10 @@ namespace HelloWPFImpeller.Interop;
 ///       -> renderTargetTexture (ID3D11Texture2D)
 ///       -> renderTargetTexture.QueryInterface&lt;IDXGIResource&gt;().GetSharedHandle(out vulkanShared)
 ///           ---> consumed by Vulkan via VK_KHR_external_memory_win32 (D3D11TextureKmtBit)
+///
+/// One <c>D3DResources</c> instance per <c>ImpellerView</c> instance: D3D9 shared
+/// handles are per-device, so sharing the D3D devices across views would tangle
+/// each view's textures with the others'.
 /// </summary>
 internal sealed unsafe class D3DResources : IDisposable
 {
@@ -139,17 +141,6 @@ internal sealed unsafe class D3DResources : IDisposable
             resource.Dispose();
         }
         _vulkanSharedHandle = (nint)vulkanHandle;
-    }
-
-    /// <summary>
-    /// For scaffold verification: fill the shared D3D9 surface with a flat color.
-    /// In the final implementation, Vulkan blit will write into the same memory instead.
-    /// </summary>
-    public void ClearForDebug(byte b, byte g, byte r, byte a = 0xFF)
-    {
-        if (_backbufferSurface.Handle == null) return;
-        uint argb = ((uint)a << 24) | ((uint)r << 16) | ((uint)g << 8) | b;
-        SilkMarshal.ThrowHResult(_d3d9Device.ColorFill(_backbufferSurface, (Silk.NET.Maths.Box2D<int>*)null, argb));
     }
 
     private void DisposeRenderTargetResources()

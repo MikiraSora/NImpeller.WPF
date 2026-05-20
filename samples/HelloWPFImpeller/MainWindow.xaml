@@ -1,18 +1,23 @@
 <Window x:Class="HelloWPFImpeller.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:interop="clr-namespace:System.Windows.Interop;assembly=PresentationCore"
-        Title="HelloWPFImpeller"
+        xmlns:imp="clr-namespace:NImpeller.Wpf;assembly=NImpeller.Wpf"
+        Title="HelloWPFImpeller — 4× ImpellerView"
         Width="1280" Height="720"
-        Background="#202020">
+        Background="#101418">
     <Grid>
-        <Image x:Name="OutputImage"
-               Stretch="None"
-               HorizontalAlignment="Stretch"
-               VerticalAlignment="Stretch"
-               UseLayoutRounding="True"
-               SnapsToDevicePixels="True"
-               RenderOptions.BitmapScalingMode="NearestNeighbor"
-               RenderOptions.EdgeMode="Aliased" />
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <imp:ImpellerView x:Name="View1" Grid.Row="0" Grid.Column="0" Render="View1_OnRender"/>
+        <imp:ImpellerView x:Name="View2" Grid.Row="0" Grid.Column="1" Render="View2_OnRender"/>
+        <imp:ImpellerView x:Name="View3" Grid.Row="1" Grid.Column="0" Render="View3_OnRender"/>
+        <imp:ImpellerView x:Name="View4" Grid.Row="1" Grid.Column="1" Render="View4_OnRender"/>
     </Grid>
 </Window>

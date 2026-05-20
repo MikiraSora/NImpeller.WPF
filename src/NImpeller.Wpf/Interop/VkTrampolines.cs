@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -6,7 +7,7 @@ using System.Runtime.InteropServices;
 using Silk.NET.Core.Native;
 using Silk.NET.Vulkan;
 
-namespace HelloWPFImpeller.Interop;
+namespace NImpeller.Wpf.Interop;
 
 /// <summary>
 /// Static trampolines installed in place of selected Vulkan entry points.
@@ -14,10 +15,18 @@ namespace HelloWPFImpeller.Interop;
 /// Each trampoline calls the corresponding "Real..." function pointer after rewriting
 /// its arguments. Real function pointers are populated lazily by VkProcInterceptor.GetProcAddress
 /// the first time Impeller asks for them.
+///
+/// Multi-instance support: the blit-on-present logic in <see cref="QueuePresentKHR"/>
+/// looks up a per-swapchain <see cref="BlitContext"/> from <see cref="BlitsBySwapchain"/>.
+/// When <see cref="CreateSwapchainKHR"/> is invoked from inside an ImpellerView's Start()
+/// path, the view first stashes a pending BlitContext via <see cref="SetPendingBlitContext"/>
+/// (using <see cref="ThreadStaticAttribute"/>, so concurrent view initializations on
+/// different threads do not collide), and the trampoline registers it under the freshly
+/// created swapchain handle.
 /// </summary>
 internal static unsafe class VkTrampolines
 {
-    // --- Real function pointers (populated by VkProcInterceptor) ---
+    // --- Real function pointers (populated by VkProcInterceptor; process-singleton) ---
     public static delegate* unmanaged[Cdecl]<InstanceCreateInfo*, AllocationCallbacks*, Instance*, Result> RealCreateInstance;
     public static delegate* unmanaged[Cdecl]<PhysicalDevice, DeviceCreateInfo*, AllocationCallbacks*, Device*, Result> RealCreateDevice;
     public static delegate* unmanaged[Cdecl]<Instance, uint*, PhysicalDevice*, Result> RealEnumeratePhysicalDevices;
@@ -28,30 +37,33 @@ internal static unsafe class VkTrampolines
     public static delegate* unmanaged[Cdecl]<Device, SwapchainKHR, ulong, Semaphore, Fence, uint*, Result> RealAcquireNextImageKHR;
     public static delegate* unmanaged[Cdecl]<Queue, PresentInfoKHR*, Result> RealQueuePresentKHR;
 
-    // --- Configuration (set by interceptor host before context creation) ---
-    public static ulong TargetAdapterLuid; // 64-bit LUID (Low + High << 32). 0 = no preference.
+    // --- LUID for physical-device reordering (set once by ImpellerSharedHost) ---
+    public static ulong TargetAdapterLuid;
 
-    // --- Swapchain state collected by hooks ---
-    // Keyed by SwapchainKHR.Handle.
-    public static readonly Dictionary<ulong, Image[]> SwapchainImages = new();
-    public static readonly Dictionary<ulong, uint> CurrentAcquiredIndex = new();
-    public static readonly Dictionary<ulong, Extent2D> SwapchainExtent = new();
+    // --- Swapchain state collected by hooks (keyed by SwapchainKHR.Handle) ---
+    public static readonly ConcurrentDictionary<ulong, Image[]> SwapchainImages = new();
+    public static readonly ConcurrentDictionary<ulong, uint> CurrentAcquiredIndex = new();
+    public static readonly ConcurrentDictionary<ulong, Extent2D> SwapchainExtent = new();
 
-    // --- Blit-on-present configuration (set by interceptor host after context creation) ---
-    public static Vk? Vk;
-    public static Device BlitDevice;
-    public static Image BlitTargetImage;        // SharedVulkanImage's VkImage (the D3D-shared target)
-    public static Extent2D BlitTargetExtent;
-    public static CommandPool BlitCommandPool;
-    public static CommandBuffer BlitCommandBuffer;
-    public static Fence BlitFence;
-    public static bool BlitEnabled;             // false until host calls InstallBlitResources
+    // --- Per-swapchain blit contexts (one per active ImpellerView) ---
+    public static readonly ConcurrentDictionary<ulong, BlitContext> BlitsBySwapchain = new();
 
     /// <summary>
-    /// Sequence number bumped every time vkQueuePresentKHR completes a blit; the WPF
-    /// renderer reads this to know when a new frame is ready to be shown via D3DImage.
+    /// ThreadStatic pending context that the next successful <c>vkCreateSwapchainKHR</c>
+    /// on this thread will be associated with. ImpellerView sets this just before calling
+    /// <c>ImpellerContext.VulkanSwapchainCreateNew</c> and clears it (via the trampoline) on success.
     /// </summary>
-    public static long BlitFrameCounter;
+    [ThreadStatic] private static BlitContext? _pendingBlitForCreate;
+
+    public static void SetPendingBlitContext(BlitContext ctx) => _pendingBlitForCreate = ctx;
+
+    public static bool UnregisterSwapchainBlit(ulong swapchainHandle)
+    {
+        SwapchainImages.TryRemove(swapchainHandle, out _);
+        CurrentAcquiredIndex.TryRemove(swapchainHandle, out _);
+        SwapchainExtent.TryRemove(swapchainHandle, out _);
+        return BlitsBySwapchain.TryRemove(swapchainHandle, out _);
+    }
 
     // --- Instance extensions appended in vkCreateInstance ---
     private static readonly string[] AppendInstanceExtensions =
@@ -70,7 +82,6 @@ internal static unsafe class VkTrampolines
         "VK_KHR_get_memory_requirements2",
     };
 
-    // --- Pinned UTF-8 byte buffers for the extension names (kept alive for the process lifetime) ---
     private static readonly byte*[] _appendInstanceExtPtrs = AllocPinnedAsciiArray(AppendInstanceExtensions);
     private static readonly byte*[] _appendDeviceExtPtrs   = AllocPinnedAsciiArray(AppendDeviceExtensions);
 
@@ -83,9 +94,9 @@ internal static unsafe class VkTrampolines
     }
 
     // ============================================================================
-    // vkCreateInstance: append instance extensions before delegating to the real call
+    // vkCreateInstance
     // ============================================================================
-    [UnmanagedCallersOnly(CallConvs = new[] { typeof(System.Runtime.CompilerServices.CallConvCdecl) })]
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     public static Result CreateInstance(InstanceCreateInfo* pCreateInfo, AllocationCallbacks* pAllocator, Instance* pInstance)
     {
         if (pCreateInfo == null || RealCreateInstance == null)
@@ -102,7 +113,7 @@ internal static unsafe class VkTrampolines
         newCreateInfo.EnabledExtensionCount = newCount;
         newCreateInfo.PpEnabledExtensionNames = newPtrs;
 
-        App.Log($"[VkTrampolines] vkCreateInstance: orig {pCreateInfo->EnabledExtensionCount} -> {newCount} extensions");
+        TraceLog.Log($"[VkTrampolines] vkCreateInstance: orig {pCreateInfo->EnabledExtensionCount} -> {newCount} extensions");
         var r = RealCreateInstance(&newCreateInfo, pAllocator, pInstance);
 
         FreeAugmented(augmented, newPtrs);
@@ -110,9 +121,9 @@ internal static unsafe class VkTrampolines
     }
 
     // ============================================================================
-    // vkCreateDevice: append device extensions before delegating to the real call
+    // vkCreateDevice
     // ============================================================================
-    [UnmanagedCallersOnly(CallConvs = new[] { typeof(System.Runtime.CompilerServices.CallConvCdecl) })]
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     public static Result CreateDevice(PhysicalDevice physicalDevice, DeviceCreateInfo* pCreateInfo, AllocationCallbacks* pAllocator, Device* pDevice)
     {
         if (pCreateInfo == null || RealCreateDevice == null)
@@ -129,7 +140,7 @@ internal static unsafe class VkTrampolines
         newCreateInfo.EnabledExtensionCount = newCount;
         newCreateInfo.PpEnabledExtensionNames = newPtrs;
 
-        App.Log($"[VkTrampolines] vkCreateDevice: orig {pCreateInfo->EnabledExtensionCount} -> {newCount} extensions");
+        TraceLog.Log($"[VkTrampolines] vkCreateDevice: orig {pCreateInfo->EnabledExtensionCount} -> {newCount} extensions");
         var r = RealCreateDevice(physicalDevice, &newCreateInfo, pAllocator, pDevice);
 
         FreeAugmented(augmented, newPtrs);
@@ -139,7 +150,7 @@ internal static unsafe class VkTrampolines
     // ============================================================================
     // vkEnumeratePhysicalDevices: if TargetAdapterLuid is set, move the matching device to index 0
     // ============================================================================
-    [UnmanagedCallersOnly(CallConvs = new[] { typeof(System.Runtime.CompilerServices.CallConvCdecl) })]
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     public static Result EnumeratePhysicalDevices(Instance instance, uint* pPhysicalDeviceCount, PhysicalDevice* pPhysicalDevices)
     {
         var r = RealEnumeratePhysicalDevices(instance, pPhysicalDeviceCount, pPhysicalDevices);
@@ -162,12 +173,12 @@ internal static unsafe class VkTrampolines
 
         if (matchIdx > 0)
         {
-            App.Log($"[VkTrampolines] vkEnumeratePhysicalDevices: swapping LUID-matched device from index {matchIdx} to 0");
+            TraceLog.Log($"[VkTrampolines] vkEnumeratePhysicalDevices: swapping LUID-matched device from index {matchIdx} to 0");
             (pPhysicalDevices[0], pPhysicalDevices[matchIdx]) = (pPhysicalDevices[matchIdx], pPhysicalDevices[0]);
         }
         else if (matchIdx < 0)
         {
-            App.Log($"[VkTrampolines] vkEnumeratePhysicalDevices: no device matched target LUID 0x{TargetAdapterLuid:X16} (have {count} devices)");
+            TraceLog.Log($"[VkTrampolines] vkEnumeratePhysicalDevices: no device matched target LUID 0x{TargetAdapterLuid:X16} (have {count} devices)");
         }
         return r;
     }
@@ -180,7 +191,6 @@ internal static unsafe class VkTrampolines
 
         if (!idProps.DeviceLuidvalid) { luid = 0; return false; }
 
-        // VkPhysicalDeviceIDProperties.deviceLUID is a uint8_t[VK_LUID_SIZE] (8 bytes), little-endian as ulong.
         ulong result = 0;
         for (int i = 0; i < 8; i++)
             result |= ((ulong)idProps.DeviceLuid[i]) << (i * 8);
@@ -191,9 +201,6 @@ internal static unsafe class VkTrampolines
     // ============================================================================
     // Extension-array augmentation helper
     // ============================================================================
-    // Strategy: allocate a new byte** array in unmanaged memory containing the original
-    // pointers plus deduped appended pointers, then return the unmanaged pointer to be
-    // freed via FreeAugmented after vkCreate*.
     private static IntPtr AugmentExtensions(uint origCount, byte** origPtrs, byte*[] appendPtrs,
         out uint newCount, out byte** newPtrs)
     {
@@ -237,8 +244,7 @@ internal static unsafe class VkTrampolines
     }
 
     // ============================================================================
-    // vkGetPhysicalDeviceSurfaceCapabilitiesKHR: force TRANSFER_SRC_BIT into
-    // supportedUsageFlags so Impeller's swapchain creation accepts our augmented usage.
+    // vkGetPhysicalDeviceSurfaceCapabilitiesKHR: force TRANSFER_SRC_BIT into supportedUsageFlags
     // ============================================================================
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     public static Result GetPhysicalDeviceSurfaceCapabilitiesKHR(PhysicalDevice physicalDevice, SurfaceKHR surface, SurfaceCapabilitiesKHR* pSurfaceCapabilities)
@@ -252,8 +258,7 @@ internal static unsafe class VkTrampolines
     }
 
     // ============================================================================
-    // vkCreateSwapchainKHR: append TRANSFER_SRC_BIT to imageUsage so we can blit
-    // the swapchain image into our shared target image during vkQueuePresentKHR.
+    // vkCreateSwapchainKHR: append TRANSFER_SRC_BIT + register pending BlitContext (if any)
     // ============================================================================
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     public static Result CreateSwapchainKHR(Device device, SwapchainCreateInfoKHR* pCreateInfo, AllocationCallbacks* pAllocator, SwapchainKHR* pSwapchain)
@@ -264,21 +269,32 @@ internal static unsafe class VkTrampolines
         var origUsage = augmented.ImageUsage;
         augmented.ImageUsage = origUsage | ImageUsageFlags.TransferSrcBit;
 
-        App.Log($"[VkTrampolines] vkCreateSwapchainKHR: usage 0x{(uint)origUsage:X} -> 0x{(uint)augmented.ImageUsage:X}, extent {augmented.ImageExtent.Width}x{augmented.ImageExtent.Height}, format {augmented.ImageFormat}, count {augmented.MinImageCount}");
+        TraceLog.Log($"[VkTrampolines] vkCreateSwapchainKHR: usage 0x{(uint)origUsage:X} -> 0x{(uint)augmented.ImageUsage:X}, extent {augmented.ImageExtent.Width}x{augmented.ImageExtent.Height}, format {augmented.ImageFormat}, count {augmented.MinImageCount}");
 
         var r = RealCreateSwapchainKHR(device, &augmented, pAllocator, pSwapchain);
         if (r == Result.Success && pSwapchain != null)
         {
             ulong handle = pSwapchain->Handle;
             SwapchainExtent[handle] = augmented.ImageExtent;
-            App.Log($"[VkTrampolines] vkCreateSwapchainKHR: created VkSwapchainKHR=0x{handle:X16}");
+
+            // Bind the per-thread pending BlitContext (if any) to this newly created swapchain.
+            var pending = _pendingBlitForCreate;
+            if (pending != null)
+            {
+                BlitsBySwapchain[handle] = pending;
+                _pendingBlitForCreate = null;
+                TraceLog.Log($"[VkTrampolines] vkCreateSwapchainKHR: registered BlitContext for VkSwapchainKHR=0x{handle:X16}");
+            }
+            else
+            {
+                TraceLog.Log($"[VkTrampolines] vkCreateSwapchainKHR: created VkSwapchainKHR=0x{handle:X16} (no pending blit context; will passthrough on present)");
+            }
         }
         return r;
     }
 
     // ============================================================================
-    // vkGetSwapchainImagesKHR: cache the VkImage[] for each swapchain so we know
-    // what to blit from in vkQueuePresentKHR.
+    // vkGetSwapchainImagesKHR: cache the VkImage[] for each swapchain so we know what to blit from
     // ============================================================================
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     public static Result GetSwapchainImagesKHR(Device device, SwapchainKHR swapchain, uint* pSwapchainImageCount, Image* pSwapchainImages)
@@ -290,15 +306,13 @@ internal static unsafe class VkTrampolines
             var arr = new Image[count];
             for (uint i = 0; i < count; i++) arr[i] = pSwapchainImages[i];
             SwapchainImages[swapchain.Handle] = arr;
-            App.Log($"[VkTrampolines] vkGetSwapchainImagesKHR: cached {count} images for swapchain 0x{swapchain.Handle:X16}");
-            for (int i = 0; i < count; i++)
-                App.Log($"    image[{i}] = 0x{arr[i].Handle:X16}");
+            TraceLog.Log($"[VkTrampolines] vkGetSwapchainImagesKHR: cached {count} images for swapchain 0x{swapchain.Handle:X16}");
         }
         return r;
     }
 
     // ============================================================================
-    // vkAcquireNextImageKHR: remember the image index for the upcoming present.
+    // vkAcquireNextImageKHR: remember the image index for the upcoming present
     // ============================================================================
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     public static Result AcquireNextImageKHR(Device device, SwapchainKHR swapchain, ulong timeout, Semaphore semaphore, Fence fence, uint* pImageIndex)
@@ -312,14 +326,12 @@ internal static unsafe class VkTrampolines
     }
 
     // ============================================================================
-    // vkQueuePresentKHR: instead of presenting to our hidden window, blit the freshly
-    // rendered swapchain image into the D3D-shared target image. WPF/D3DImage then
-    // picks up the result via the D3D9 surface that aliases the same memory.
+    // vkQueuePresentKHR: look up per-swapchain BlitContext and blit; passthrough if none
     // ============================================================================
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     public static Result QueuePresentKHR(Queue queue, PresentInfoKHR* pPresentInfo)
     {
-        if (!BlitEnabled || Vk is null || pPresentInfo == null || pPresentInfo->SwapchainCount == 0)
+        if (pPresentInfo == null || pPresentInfo->SwapchainCount == 0)
             return RealQueuePresentKHR(queue, pPresentInfo);
 
         var swapchainPtr = pPresentInfo->PSwapchains;
@@ -327,46 +339,48 @@ internal static unsafe class VkTrampolines
         ulong swapchainHandle = swapchainPtr[0].Handle;
         uint imageIndex = indexPtr[0];
 
+        if (!BlitsBySwapchain.TryGetValue(swapchainHandle, out var ctx))
+            return RealQueuePresentKHR(queue, pPresentInfo);
+
         if (!SwapchainImages.TryGetValue(swapchainHandle, out var imageArr) || imageIndex >= imageArr.Length)
         {
-            App.Log($"[VkTrampolines] vkQueuePresentKHR: swapchain 0x{swapchainHandle:X16} or index {imageIndex} not cached; falling back to passthrough");
+            TraceLog.Log($"[VkTrampolines] vkQueuePresentKHR: swapchain 0x{swapchainHandle:X16} or index {imageIndex} not cached; passthrough");
             return RealQueuePresentKHR(queue, pPresentInfo);
         }
 
         var srcImage = imageArr[imageIndex];
         if (!SwapchainExtent.TryGetValue(swapchainHandle, out var srcExtent))
-            srcExtent = BlitTargetExtent;
+            srcExtent = ctx.TargetExtent;
 
         try
         {
-            DoBlit(queue, srcImage, srcExtent, pPresentInfo->PWaitSemaphores, pPresentInfo->WaitSemaphoreCount);
-            System.Threading.Interlocked.Increment(ref BlitFrameCounter);
+            DoBlit(ctx, queue, srcImage, srcExtent, pPresentInfo->PWaitSemaphores, pPresentInfo->WaitSemaphoreCount);
+            System.Threading.Interlocked.Increment(ref ctx.FrameCounter);
         }
         catch (Exception ex)
         {
-            App.Log($"[VkTrampolines] vkQueuePresentKHR blit failed: {ex.Message}");
+            TraceLog.Log($"[VkTrampolines] vkQueuePresentKHR blit failed: {ex.Message}");
         }
 
-        // Skip the real present — the swapchain image is owned by us at this point,
-        // but ANV/driver expects the image back in PRESENT_SRC_KHR (we leave it that way
-        // at the end of DoBlit) and won't actually display anything since the window is hidden.
-        // We still need to "ack" so the next vkAcquireNextImageKHR will succeed; the simplest
-        // way is to call the real present too. The wait semaphores have already been consumed
-        // by our DoBlit submit, so we must NOT pass them again — make a copy with 0 semaphores.
+        // Still call the real present (with no wait semaphores — those were consumed by DoBlit's submit)
+        // so the swapchain advances normally. Nothing is actually displayed since the surface lives on
+        // a hidden 1x1 window.
         var copy = *pPresentInfo;
         copy.WaitSemaphoreCount = 0;
         copy.PWaitSemaphores = null;
         return RealQueuePresentKHR(queue, &copy);
     }
 
-    private static void DoBlit(Queue queue, Image srcImage, Extent2D srcExtent, Semaphore* pWaitSemaphores, uint waitSemaphoreCount)
+    private static void DoBlit(BlitContext ctx, Queue queue, Image srcImage, Extent2D srcExtent,
+        Semaphore* pWaitSemaphores, uint waitSemaphoreCount)
     {
-        var vk = Vk!;
-        var device = BlitDevice;
-        var cmd = BlitCommandBuffer;
-        var fence = BlitFence;
+        var vk = ctx.Vk;
+        var device = ctx.Device;
+        var cmd = ctx.CommandBuffer;
+        var fence = ctx.Fence;
+        var targetImage = ctx.TargetImage;
+        var targetExtent = ctx.TargetExtent;
 
-        // Wait for the previous blit to finish before recycling cmd/fence.
         var fenceLocal = fence;
         Check(vk.WaitForFences(device, 1u, in fenceLocal, true, 1_000_000_000ul), "vkWaitForFences(blit prev)");
         Check(vk.ResetFences(device, 1u, in fenceLocal), "vkResetFences(blit)");
@@ -377,7 +391,8 @@ internal static unsafe class VkTrampolines
 
         var range = new ImageSubresourceRange(ImageAspectFlags.ColorBit, 0u, 1u, 0u, 1u);
 
-        // 1. Transition src (swapchain image): PRESENT_SRC_KHR -> TRANSFER_SRC_OPTIMAL
+        // 1. src (swapchain image) PRESENT_SRC_KHR -> TRANSFER_SRC_OPTIMAL
+        //    dst (D3D-shared image) UNDEFINED      -> TRANSFER_DST_OPTIMAL
         var bSrcToTransferSrc = new ImageMemoryBarrier(
             oldLayout: ImageLayout.PresentSrcKhr,
             newLayout: ImageLayout.TransferSrcOptimal,
@@ -388,10 +403,6 @@ internal static unsafe class VkTrampolines
             image: srcImage,
             subresourceRange: range);
 
-        // 2. Transition dst (target shared image): COLOR_ATTACHMENT_OPTIMAL/UNDEFINED -> TRANSFER_DST_OPTIMAL
-        //    We use UNDEFINED as oldLayout because we don't strictly need to preserve the previous frame's
-        //    contents (we overwrite the full image). This is faster and works regardless of how the
-        //    image was last left.
         var bDstToTransferDst = new ImageMemoryBarrier(
             oldLayout: ImageLayout.Undefined,
             newLayout: ImageLayout.TransferDstOptimal,
@@ -399,7 +410,7 @@ internal static unsafe class VkTrampolines
             dstAccessMask: AccessFlags.TransferWriteBit,
             srcQueueFamilyIndex: Vk.QueueFamilyIgnored,
             dstQueueFamilyIndex: Vk.QueueFamilyIgnored,
-            image: BlitTargetImage,
+            image: targetImage,
             subresourceRange: range);
 
         var barriers0 = stackalloc ImageMemoryBarrier[2] { bSrcToTransferSrc, bDstToTransferDst };
@@ -411,21 +422,21 @@ internal static unsafe class VkTrampolines
             bufferMemoryBarrierCount: 0u, pBufferMemoryBarriers: null,
             imageMemoryBarrierCount: 2u, pImageMemoryBarriers: barriers0);
 
-        // 3. vkCmdBlitImage (driver handles RGBA<->BGRA channel swizzle for unorm formats)
+        // 2. vkCmdBlitImage (driver handles RGBA<->BGRA channel swizzle for unorm formats)
         var blit = new ImageBlit();
         blit.SrcSubresource = new ImageSubresourceLayers(ImageAspectFlags.ColorBit, 0u, 0u, 1u);
         blit.SrcOffsets.Element0 = default;
         blit.SrcOffsets.Element1 = new Offset3D((int)srcExtent.Width, (int)srcExtent.Height, 1);
         blit.DstSubresource = new ImageSubresourceLayers(ImageAspectFlags.ColorBit, 0u, 0u, 1u);
         blit.DstOffsets.Element0 = default;
-        blit.DstOffsets.Element1 = new Offset3D((int)BlitTargetExtent.Width, (int)BlitTargetExtent.Height, 1);
+        blit.DstOffsets.Element1 = new Offset3D((int)targetExtent.Width, (int)targetExtent.Height, 1);
 
         vk.CmdBlitImage(cmd,
             srcImage, ImageLayout.TransferSrcOptimal,
-            BlitTargetImage, ImageLayout.TransferDstOptimal,
+            targetImage, ImageLayout.TransferDstOptimal,
             1u, &blit, Filter.Linear);
 
-        // 4. Transition back: src -> PRESENT_SRC_KHR (so passthrough vkQueuePresentKHR is happy),
+        // 3. src -> PRESENT_SRC_KHR (keep swapchain image happy for next present)
         //    dst -> COLOR_ATTACHMENT_OPTIMAL (stable terminal state for D3D side to read)
         var bSrcBack = new ImageMemoryBarrier(
             oldLayout: ImageLayout.TransferSrcOptimal,
@@ -444,7 +455,7 @@ internal static unsafe class VkTrampolines
             dstAccessMask: AccessFlags.ColorAttachmentReadBit | AccessFlags.ColorAttachmentWriteBit,
             srcQueueFamilyIndex: Vk.QueueFamilyIgnored,
             dstQueueFamilyIndex: Vk.QueueFamilyIgnored,
-            image: BlitTargetImage,
+            image: targetImage,
             subresourceRange: range);
 
         var barriers1 = stackalloc ImageMemoryBarrier[2] { bSrcBack, bDstBack };
@@ -458,8 +469,6 @@ internal static unsafe class VkTrampolines
 
         Check(vk.EndCommandBuffer(cmd), "vkEndCommandBuffer(blit)");
 
-        // Submit: wait on Impeller's render-done semaphore (carried in pPresentInfo.pWaitSemaphores),
-        // signal nothing (the real vkQueuePresentKHR we call afterwards has no wait semaphores).
         var cmdLocal = cmd;
         var waitStages = stackalloc PipelineStageFlags[(int)Math.Max(1u, waitSemaphoreCount)];
         for (int i = 0; i < waitSemaphoreCount; i++)
@@ -472,36 +481,11 @@ internal static unsafe class VkTrampolines
             commandBufferCount: 1u,
             pCommandBuffers: &cmdLocal);
 
-        Check(vk.QueueSubmit(queue, 1u, &submitInfo, fence), "vkQueueSubmit(blit)");
-        // CPU-side wait so the D3D side can read the result safely in the next D3DImage.Lock cycle.
-        Check(vk.WaitForFences(device, 1u, in fenceLocal, true, 1_000_000_000ul), "vkWaitForFences(blit)");
-    }
-
-    public static void InstallBlitResources(Vk vk, Device device, Queue queue, uint queueFamilyIndex,
-        Image targetImage, Extent2D targetExtent)
-    {
-        Vk = vk;
-        BlitDevice = device;
-        BlitTargetImage = targetImage;
-        BlitTargetExtent = targetExtent;
-
-        var poolInfo = new CommandPoolCreateInfo(
-            flags: CommandPoolCreateFlags.ResetCommandBufferBit,
-            queueFamilyIndex: queueFamilyIndex);
-        Check(vk.CreateCommandPool(device, &poolInfo, null, out BlitCommandPool), "vkCreateCommandPool(blit)");
-
-        var allocInfo = new CommandBufferAllocateInfo(
-            commandPool: BlitCommandPool,
-            level: CommandBufferLevel.Primary,
-            commandBufferCount: 1u);
-        Check(vk.AllocateCommandBuffers(device, &allocInfo, out BlitCommandBuffer), "vkAllocateCommandBuffers(blit)");
-
-        // Fence created signaled so the first WaitForFences in DoBlit returns immediately.
-        var fenceInfo = new FenceCreateInfo(flags: FenceCreateFlags.SignaledBit);
-        Check(vk.CreateFence(device, &fenceInfo, null, out BlitFence), "vkCreateFence(blit)");
-
-        BlitEnabled = true;
-        App.Log($"[VkTrampolines] blit resources installed (target image=0x{targetImage.Handle:X16}, extent={targetExtent.Width}x{targetExtent.Height})");
+        lock (ctx.QueueSubmitLock)
+        {
+            Check(vk.QueueSubmit(queue, 1u, &submitInfo, fence), "vkQueueSubmit(blit)");
+            Check(vk.WaitForFences(device, 1u, in fenceLocal, true, 1_000_000_000ul), "vkWaitForFences(blit)");
+        }
     }
 
     private static void Check(Result r, string what)

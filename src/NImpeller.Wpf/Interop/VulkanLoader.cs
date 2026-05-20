@@ -1,7 +1,7 @@
 using System;
 using System.Runtime.InteropServices;
 
-namespace HelloWPFImpeller.Interop;
+namespace NImpeller.Wpf.Interop;
 
 /// <summary>
 /// Loads the real Vulkan loader (vulkan-1.dll) and exposes the bootstrap function
