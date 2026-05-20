@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
@@ -15,10 +16,21 @@ public partial class MainWindow : Window
     private const string TitleBase = "HelloWPFImpellerGallery";
 
     private IGalleryScene? _currentScene;
-    private readonly DispatcherTimer _titleTimer;
+
+    // FPS measurement (drives the title bar)
+    // Strategy: count frames inside OnRender, recompute every >=500ms of wall-clock
+    // (Stopwatch — Background-priority DispatcherTimer skews badly under load).
+    // Light EWMA smoothing so the displayed number doesn't flicker frame-to-frame
+    // but still tracks real changes within a second or two.
+    private readonly Stopwatch _fpsClock = Stopwatch.StartNew();
     private int _frameCount;
-    private double _fps;
-    private DateTime _lastFpsSample = DateTime.UtcNow;
+    private double _instantFps;
+    private double _smoothedFps;
+    private const double FpsSampleSeconds = 0.5;
+    private const double FpsSmoothing = 0.4; // 0 = no smoothing, 1 = freeze
+
+    // Title-bar refresh — Render priority so it isn't starved by background work
+    private readonly DispatcherTimer _titleTimer;
 
     /// <summary>Remembered "default" item count for each configurable scene (for the reset button).</summary>
     private readonly Dictionary<IConfigurableScene, int> _defaultCounts = new();
@@ -37,7 +49,10 @@ public partial class MainWindow : Window
 
         GalleryView.Start();
 
-        _titleTimer = new DispatcherTimer(TimeSpan.FromSeconds(1), DispatcherPriority.Background, OnTitleTick, Dispatcher);
+        // Refresh title 4x/sec at Render priority so the number feels responsive
+        // and isn't delayed when the renderer is busy. The actual measurement runs
+        // inside OnRender — this timer just pushes the latest value to the title bar.
+        _titleTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(250), DispatcherPriority.Render, OnTitleTick, Dispatcher);
         _titleTimer.Start();
     }
 
@@ -45,13 +60,18 @@ public partial class MainWindow : Window
     {
         _currentScene = SceneList.SelectedItem as IGalleryScene;
         UpdateCountControlsVisibility();
+
+        // Reset FPS measurement so a scene switch doesn't carry over old throughput.
+        _frameCount = 0;
+        _instantFps = 0;
+        _smoothedFps = 0;
+        _fpsClock.Restart();
     }
 
     private void UpdateCountControlsVisibility()
     {
         if (_currentScene is IConfigurableScene cs)
         {
-            // Remember the initial count the very first time we see this scene, so the reset button works.
             if (!_defaultCounts.ContainsKey(cs))
                 _defaultCounts[cs] = cs.ItemCount;
 
@@ -109,20 +129,33 @@ public partial class MainWindow : Window
         {
             scene.Render(e);
         }
+
+        // FPS bookkeeping — runs on the same UI thread as the render, so no locking.
         _frameCount++;
+        double elapsed = _fpsClock.Elapsed.TotalSeconds;
+        if (elapsed >= FpsSampleSeconds)
+        {
+            _instantFps = _frameCount / elapsed;
+            _smoothedFps = _smoothedFps == 0
+                ? _instantFps
+                : _smoothedFps * FpsSmoothing + _instantFps * (1 - FpsSmoothing);
+            _frameCount = 0;
+            _fpsClock.Restart();
+        }
     }
 
     private void OnTitleTick(object? sender, EventArgs e)
     {
-        var now = DateTime.UtcNow;
-        var elapsed = (now - _lastFpsSample).TotalSeconds;
-        if (elapsed > 0)
+        // If no frame has fired for over 2 seconds (e.g. window minimized, or scene render
+        // is hanging) the smoothed value is stale — bias it towards zero so the title bar
+        // doesn't keep showing a misleadingly high number.
+        if (_fpsClock.Elapsed.TotalSeconds > 2.0)
         {
-            _fps = _frameCount / elapsed;
-            _frameCount = 0;
-            _lastFpsSample = now;
+            _smoothedFps *= 0.5;
+            if (_smoothedFps < 0.05) _smoothedFps = 0;
         }
+
         var name = _currentScene?.Name ?? "—";
-        Title = $"{TitleBase}  —  {name}  —  {_fps,5:0.0} fps";
+        Title = $"{TitleBase}  —  {name}  —  {_smoothedFps,5:0.0} fps";
     }
 }
