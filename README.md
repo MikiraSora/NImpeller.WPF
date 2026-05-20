@@ -1,3 +1,21 @@
+# About WPF integration
+
+`NImpeller.Wpf` is a companion library that hosts Impeller rendering inside a WPF window through a regular
+`FrameworkElement`. It implements the Vulkan-to-`D3DImage` bridge (using `VK_KHR_external_memory_win32` to
+share a texture between Impeller's `VkDevice` and Direct3D 9Ex) and supports multiple `ImpellerView` instances
+per window.
+
+- Library source: [`src/NImpeller.Wpf`](src/NImpeller.Wpf/)
+- Library documentation: [**src/NImpeller.Wpf/README.md**](src/NImpeller.Wpf/README.md) — installation,
+  full API surface, multi-instance usage, on-demand rendering, diagnostics, and a "how it works" walk-through.
+- Sample applications:
+  - [`samples/HelloWPFImpeller`](samples/HelloWPFImpeller/) — four `ImpellerView` controls in a 2×2 grid,
+    each rendering an animated scene, demonstrating multi-instance support.
+  - [`samples/HelloWPFImpellerGallery`](samples/HelloWPFImpellerGallery/) — a gallery app with a sidebar
+    list of scenes (basic shapes, stroke styles, paths, dashed lines, transforms, blend modes, shadows,
+    typography, animation showcase) and a single `ImpellerView` rendering the selected scene.
+
+
 # Impeller .NET bindings
 
 The general approach for NImpeller is to treat impeller.h as the only source of truth and manually write only some convenience code or code dealing with native->managed callbacks (there is only a few of those). The generator is supposed to generate the entire P/Invoke layer and at least 90% of .NET classes exposed as the public API.
@@ -79,20 +97,3 @@ mkdir -p ide
 #jq 'map(select(.command | startswith("vpython") or startswith("rm") or startswith("ln") | not))'
 
 ```
-
-## WPF integration
-
-`NImpeller.Wpf` is a companion library that hosts Impeller rendering inside a WPF window through a regular
-`FrameworkElement`. It implements the Vulkan-to-`D3DImage` bridge (using `VK_KHR_external_memory_win32` to
-share a texture between Impeller's `VkDevice` and Direct3D 9Ex) and supports multiple `ImpellerView` instances
-per window.
-
-- Library source: [`src/NImpeller.Wpf`](src/NImpeller.Wpf/)
-- Library documentation: [**src/NImpeller.Wpf/README.md**](src/NImpeller.Wpf/README.md) — installation,
-  full API surface, multi-instance usage, on-demand rendering, diagnostics, and a "how it works" walk-through.
-- Sample applications:
-  - [`samples/HelloWPFImpeller`](samples/HelloWPFImpeller/) — four `ImpellerView` controls in a 2×2 grid,
-    each rendering an animated scene, demonstrating multi-instance support.
-  - [`samples/HelloWPFImpellerGallery`](samples/HelloWPFImpellerGallery/) — a gallery app with a sidebar
-    list of scenes (basic shapes, stroke styles, paths, dashed lines, transforms, blend modes, shadows,
-    typography, animation showcase) and a single `ImpellerView` rendering the selected scene.
