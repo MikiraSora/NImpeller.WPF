@@ -44,6 +44,7 @@ public static class GalleryScenes
         new SparklineScene(),
         new AnimationShowcaseScene(),
         new ManualInvalidateScene(),
+        new AirspaceTestScene(),
         // [StressTest] series — push base APIs to find frame-time ceilings
         new StressTestRectsScene(),
         new StressTestCirclesScene(),
