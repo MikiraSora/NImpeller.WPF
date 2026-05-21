@@ -25,9 +25,27 @@ public sealed class ImpellerRenderEventArgs : EventArgs
         TimeSpan deltaTime,
         TimeSpan totalTime,
         long frameNumber)
+        : this(source, builder, null, typography, pixelWidth, pixelHeight, dpiScaleX, dpiScaleY, deltaTime, totalTime, frameNumber)
+    {
+    }
+
+    /// <summary>Create render event data for a single Impeller frame.</summary>
+    public ImpellerRenderEventArgs(
+        ImpellerView source,
+        ImpellerDisplayListBuilder builder,
+        ImpellerContext? context,
+        ImpellerTypographyContext? typography,
+        int pixelWidth,
+        int pixelHeight,
+        float dpiScaleX,
+        float dpiScaleY,
+        TimeSpan deltaTime,
+        TimeSpan totalTime,
+        long frameNumber)
     {
         Source = source;
         Builder = builder;
+        Context = context;
         Typography = typography;
         PixelWidth = pixelWidth;
         PixelHeight = pixelHeight;
@@ -43,6 +61,9 @@ public sealed class ImpellerRenderEventArgs : EventArgs
 
     /// <summary>The active display-list builder. Issue all <c>Draw*</c> calls on this.</summary>
     public ImpellerDisplayListBuilder Builder { get; }
+
+    /// <summary>The Impeller context used by this view, when supplied by the render host.</summary>
+    public ImpellerContext? Context { get; }
 
     /// <summary>Shared typography context (null if Impeller failed to create one).</summary>
     public ImpellerTypographyContext? Typography { get; }

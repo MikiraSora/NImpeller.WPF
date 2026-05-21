@@ -335,6 +335,7 @@ public sealed unsafe class ImpellerView : FrameworkElement, IDisposable
             var args = new ImpellerRenderEventArgs(
                 source: this,
                 builder: builder,
+                context: resources.Context ?? throw new InvalidOperationException("Impeller context is not available."),
                 typography: resources.Typography,
                 pixelWidth: (int)resources.PixelWidth,
                 pixelHeight: (int)resources.PixelHeight,

@@ -94,6 +94,8 @@ public partial class MainWindow : Window
 
     private void UpdateSceneContent()
     {
+        DisposeInactiveScenes();
+
         if (_currentScene is IContentGalleryScene contentScene)
         {
             if (!ReferenceEquals(_currentContentScene, contentScene))
@@ -117,6 +119,15 @@ public partial class MainWindow : Window
         SceneContentHost.Visibility = Visibility.Collapsed;
         GalleryView.Visibility = Visibility.Visible;
         GalleryView.Start();
+    }
+
+    private void DisposeInactiveScenes()
+    {
+        foreach (var scene in GalleryScenes.All)
+        {
+            if (!ReferenceEquals(scene, _currentScene) && scene is IDisposable disposable)
+                disposable.Dispose();
+        }
     }
 
     private void RefreshCountLabel(IConfigurableScene cs)

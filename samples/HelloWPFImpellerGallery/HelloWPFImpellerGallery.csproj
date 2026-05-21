@@ -17,4 +17,10 @@
     <ProjectReference Include="..\..\src\NImpeller.Wpf\NImpeller.Wpf.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Remove="Resources\tex.png" />
+    <Content Include="Resources\tex.png" CopyToOutputDirectory="PreserveNewest" />
+    <Resource Include="Resources\tex.png" />
+  </ItemGroup>
+
 </Project>

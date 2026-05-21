@@ -32,6 +32,7 @@ internal sealed unsafe class ImpellerViewResources : IDisposable
     }
 
     internal D3DImage? D3DImage => _d3dImage;
+    internal ImpellerContext? Context => _host?.Context;
     internal ImpellerTypographyContext? Typography => _host?.Typography;
     internal uint PixelWidth { get; private set; }
     internal uint PixelHeight { get; private set; }

@@ -1,6 +1,7 @@
 using System;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Threading;
 // ReSharper disable InconsistentNaming
 
 namespace NImpeller;
@@ -8,6 +9,27 @@ namespace NImpeller;
 /// <summary>Managed owner for an Impeller rendering context.</summary>
 public unsafe partial class ImpellerContext
 {
+    private sealed class TextureUploadBuffer
+    {
+        private nint _data;
+
+        public TextureUploadBuffer(ReadOnlySpan<byte> contents)
+        {
+            Length = contents.Length;
+            _data = (nint)NativeMemory.Alloc((nuint)Length);
+            contents.CopyTo(new Span<byte>((void*)_data, Length));
+        }
+
+        public byte* Data => (byte*)_data;
+        public int Length { get; }
+
+        public void Release()
+        {
+            var data = Interlocked.Exchange(ref _data, 0);
+            if (data != 0)
+                NativeMemory.Free((void*)data);
+        }
+    }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     static IntPtr GetProcAddressCallback(IntPtr proc, IntPtr userData)
@@ -19,6 +41,22 @@ public unsafe partial class ImpellerContext
     static IntPtr GetVulkanProcAddressCallback(IntPtr vkInstance, IntPtr proc, IntPtr userData)
     {
         return ((Func<IntPtr, IntPtr, IntPtr>)GCHandle.FromIntPtr(userData).Target!)(vkInstance, proc!);
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    static void ReleaseTextureUploadBufferCallback(IntPtr userData)
+    {
+        ReleaseTextureUploadBuffer(userData);
+    }
+
+    private static void ReleaseTextureUploadBuffer(IntPtr userData)
+    {
+        if (userData == IntPtr.Zero) return;
+
+        var handle = GCHandle.FromIntPtr(userData);
+        if (handle.Target is TextureUploadBuffer buffer)
+            buffer.Release();
+        handle.Free();
     }
 
     /// <summary>Create a Vulkan-backed Impeller context using a name-based proc-address resolver.</summary>
@@ -82,5 +120,41 @@ public unsafe partial class ImpellerContext
         if (UnsafeNativeMethods.ImpellerContextGetVulkanInfo(Handle, &info) == 0)
             return null;
         return info;
+    }
+
+    /// <summary>Create a texture from tightly packed RGBA8888 pixel data.</summary>
+    /// <param name="descriptor">Texture descriptor that matches the supplied pixel data.</param>
+    /// <param name="contents">Tightly packed decompressed texture contents.</param>
+    /// <returns>A new texture, or null if native texture creation failed.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="contents"/> is empty.</exception>
+    public ImpellerTexture? TextureCreateWithContentsNew(
+        ImpellerTextureDescriptor descriptor,
+        ReadOnlySpan<byte> contents)
+    {
+        if (contents.IsEmpty)
+            throw new ArgumentException("Texture contents must not be empty.", nameof(contents));
+
+        var buffer = new TextureUploadBuffer(contents);
+        var userData = GCHandle.ToIntPtr(GCHandle.Alloc(buffer));
+        var mapping = new ImpellerMapping
+        {
+            Data = buffer.Data,
+            Length = (ulong)buffer.Length,
+            On_release = (IntPtr)(delegate* unmanaged[Cdecl]<IntPtr, void>)&ReleaseTextureUploadBufferCallback,
+        };
+
+        try
+        {
+            var ret = UnsafeNativeMethods.ImpellerTextureCreateWithContentsNew(Handle, &descriptor, &mapping, userData);
+            if (ret != null)
+                return new ImpellerTexture(ret);
+        }
+        catch
+        {
+            ReleaseTextureUploadBuffer(userData);
+            throw;
+        }
+
+        return null;
     }
 }
