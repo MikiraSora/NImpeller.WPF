@@ -18,8 +18,8 @@ namespace NImpeller.Wpf.Interop;
 ///
 /// Multi-instance support: the blit-on-present logic in <see cref="QueuePresentKHR"/>
 /// looks up a per-swapchain <see cref="BlitContext"/> from <see cref="BlitsBySwapchain"/>.
-/// When <see cref="CreateSwapchainKHR"/> is invoked from inside an ImpellerView's Start()
-/// path, the view first stashes a pending BlitContext via <see cref="SetPendingBlitContext"/>
+/// When <see cref="CreateSwapchainKHR"/> is invoked during an ImpellerView resource
+/// build, the view first stashes a pending BlitContext via <see cref="SetPendingBlitContext"/>
 /// (using <see cref="ThreadStaticAttribute"/>, so concurrent view initializations on
 /// different threads do not collide), and the trampoline registers it under the freshly
 /// created swapchain handle.
@@ -438,7 +438,7 @@ internal static unsafe class VkTrampolines
 
         // Still call the real present (with no wait semaphores — those were consumed by DoBlit's submit)
         // so the swapchain advances normally. Nothing is actually displayed since the surface lives on
-        // a hidden 1x1 window.
+        // an invisible per-view window.
         var copy = *pPresentInfo;
         copy.WaitSemaphoreCount = 0;
         copy.PWaitSemaphores = null;

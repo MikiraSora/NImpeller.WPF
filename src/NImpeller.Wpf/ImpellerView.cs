@@ -32,13 +32,25 @@ public sealed unsafe class ImpellerView : FrameworkElement, IDisposable
     private uint _pixelWidth;
     private uint _pixelHeight;
 
+    /// <summary>True while this view is registered for continuous rendering.</summary>
     public bool IsStarted => _renderLoop.IsRunning;
+
+    /// <summary>Current backing render-target width in pixels, or 0 before initialization.</summary>
     public int PixelWidth => (int)_pixelWidth;
+
+    /// <summary>Current backing render-target height in pixels, or 0 before initialization.</summary>
     public int PixelHeight => (int)_pixelHeight;
+
+    /// <summary>Current horizontal DPI scale used to convert DIPs to physical pixels.</summary>
     public double DpiScaleX => _dpiScaleX;
+
+    /// <summary>Current vertical DPI scale used to convert DIPs to physical pixels.</summary>
     public double DpiScaleY => _dpiScaleY;
+
+    /// <summary>Number assigned to the most recently rendered frame. The first rendered frame is 1.</summary>
     public long FrameNumber => _renderLoop.FrameNumber;
 
+    /// <summary>Create an uninitialized Impeller view. Call <see cref="InitializeRender()"/> or <see cref="Start"/> to initialize rendering.</summary>
     public ImpellerView()
     {
         _renderLoop = new ImpellerRenderLoop(Dispatcher, RenderOneFrame);
@@ -72,7 +84,7 @@ public sealed unsafe class ImpellerView : FrameworkElement, IDisposable
         if (_isInitialized || _initializeRequested)
             throw new InvalidOperationException(
                 "ImpellerView has already been initialized or scheduled for initialization. " +
-                "Call Start() / Stop() to control the continuous render loop; detach and re-attach the view to reinitialize with new settings.");
+                "Call Start() / Stop() to control the continuous render loop; create a new ImpellerView to initialize with different settings.");
 
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _initializeRequested = true;
@@ -83,8 +95,9 @@ public sealed unsafe class ImpellerView : FrameworkElement, IDisposable
     }
 
     /// <summary>
-    /// Start continuous rendering. If the view has not been initialized, it is initialized
-    /// with default settings and starts when initialization completes.
+    /// Start continuous rendering. If initialization was already requested, those settings
+    /// are used; otherwise the view initializes with default settings. If the view is not
+    /// loaded yet, startup is deferred until <c>Loaded</c>.
     /// </summary>
     public void Start()
     {
@@ -106,7 +119,7 @@ public sealed unsafe class ImpellerView : FrameworkElement, IDisposable
         _renderLoop.Start();
     }
 
-    /// <summary>Request one redraw without starting the continuous render loop.</summary>
+    /// <summary>Request one redraw without starting the continuous render loop. No-op before initialization.</summary>
     public void InvalidateRender()
     {
         if (!_isInitialized) return;

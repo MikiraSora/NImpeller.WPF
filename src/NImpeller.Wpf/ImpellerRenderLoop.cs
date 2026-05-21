@@ -8,16 +8,16 @@ namespace NImpeller.Wpf;
 
 internal readonly struct ImpellerFrameTiming
 {
-    public ImpellerFrameTiming(TimeSpan deltaTime, TimeSpan totalTime, long frameNumber)
+    internal ImpellerFrameTiming(TimeSpan deltaTime, TimeSpan totalTime, long frameNumber)
     {
         DeltaTime = deltaTime;
         TotalTime = totalTime;
         FrameNumber = frameNumber;
     }
 
-    public TimeSpan DeltaTime { get; }
-    public TimeSpan TotalTime { get; }
-    public long FrameNumber { get; }
+    internal TimeSpan DeltaTime { get; }
+    internal TimeSpan TotalTime { get; }
+    internal long FrameNumber { get; }
 }
 
 internal sealed class ImpellerRenderLoop
@@ -30,45 +30,45 @@ internal sealed class ImpellerRenderLoop
     private long _frameNumber;
     private bool _invalidateRequested;
 
-    public ImpellerRenderLoop(Dispatcher dispatcher, Action renderFrame)
+    internal ImpellerRenderLoop(Dispatcher dispatcher, Action renderFrame)
     {
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
         _renderFrame = renderFrame ?? throw new ArgumentNullException(nameof(renderFrame));
     }
 
-    public bool StartRequested { get; private set; }
-    public bool IsRunning => _tickCallback != null;
-    public long FrameNumber => _frameNumber;
+    internal bool StartRequested { get; private set; }
+    internal bool IsRunning => _tickCallback != null;
+    internal long FrameNumber => _frameNumber;
 
-    public void SetStartRequested(bool value)
+    internal void SetStartRequested(bool value)
     {
         StartRequested = value;
     }
 
-    public void RequestStart()
+    internal void RequestStart()
     {
         StartRequested = true;
     }
 
-    public void Start()
+    internal void Start()
     {
         StartRequested = true;
         RegisterToTicker();
     }
 
-    public void Stop()
+    internal void Stop()
     {
         StartRequested = false;
         UnregisterFromTicker();
     }
 
-    public void Suspend()
+    internal void Suspend()
     {
         _invalidateRequested = false;
         UnregisterFromTicker();
     }
 
-    public void InvalidateRender()
+    internal void InvalidateRender()
     {
         if (_invalidateRequested) return;
 
@@ -76,12 +76,12 @@ internal sealed class ImpellerRenderLoop
         _dispatcher.BeginInvoke((Action)DispatchFrame);
     }
 
-    public void RestartClock()
+    internal void RestartClock()
     {
         _stopwatch.Restart();
     }
 
-    public ImpellerFrameTiming AdvanceFrame()
+    internal ImpellerFrameTiming AdvanceFrame()
     {
         var totalTime = _stopwatch.Elapsed;
         var deltaTime = totalTime - _lastFrameTime;

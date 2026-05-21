@@ -4,15 +4,15 @@ using System.Runtime.InteropServices;
 namespace NImpeller.Wpf.Interop;
 
 /// <summary>
-/// A 1×1 invisible top-level window used purely to obtain a VkSurfaceKHR
+/// An invisible top-level window used purely to obtain a VkSurfaceKHR
 /// (through VK_KHR_win32_surface). Impeller's Vulkan backend requires a
 /// VkSurfaceKHR to create its swapchain; we never present to this window —
 /// vkQueuePresentKHR is hooked and turned into a blit into the shared
 /// D3D-Vulkan texture instead.
 ///
-/// Multiple <c>VkSurfaceKHR</c> instances may be created from the same HWND,
-/// which is why the library keeps a single shared instance of this window in
-/// <see cref="ImpellerSharedHost"/> rather than one per ImpellerView.
+/// Each <see cref="ImpellerView"/> owns one hidden window so
+/// vkGetPhysicalDeviceSurfaceCapabilitiesKHR reports the view's current
+/// physical extent during swapchain creation.
 /// </summary>
 internal sealed class HiddenVulkanWindow : IDisposable
 {

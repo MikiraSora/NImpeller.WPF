@@ -12,7 +12,7 @@ internal sealed class ImpellerResizeScheduler
     private DispatcherTimer? _timer;
     private bool _resizeInProgress;
 
-    public ImpellerResizeScheduler(
+    internal ImpellerResizeScheduler(
         Dispatcher dispatcher,
         Func<(uint Width, uint Height)> getTargetSize,
         Func<(uint Width, uint Height)> getCurrentSize,
@@ -24,9 +24,9 @@ internal sealed class ImpellerResizeScheduler
         _resize = resize ?? throw new ArgumentNullException(nameof(resize));
     }
 
-    public bool IsEnabled { get; set; }
+    internal bool IsEnabled { get; set; }
 
-    public void ScheduleIfChanged()
+    internal void ScheduleIfChanged()
     {
         if (!IsEnabled) return;
 
@@ -39,7 +39,7 @@ internal sealed class ImpellerResizeScheduler
         _timer.Start();
     }
 
-    public void Stop()
+    internal void Stop()
     {
         _timer?.Stop();
         _timer = null;

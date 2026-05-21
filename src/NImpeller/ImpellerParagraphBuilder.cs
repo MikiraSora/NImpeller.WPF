@@ -3,6 +3,8 @@ using System;
 using System.Text;
 
 namespace NImpeller;
+
+/// <summary>Builds an Impeller paragraph from styled UTF-8 text.</summary>
 public partial class ImpellerParagraphBuilder
 {
     /// <summary>
@@ -18,7 +20,7 @@ public partial class ImpellerParagraphBuilder
     /// </para>
     /// <para>
     /// The text is styled with the current top style on the style stack.
-    /// Push styles with <see cref="ImpellerParagraphStyle.PushStyle"/> before adding text to apply styling.
+    /// Push styles with <see cref="PushStyle"/> before adding text to apply styling.
     /// </para>
     /// </remarks>
     public void AddText(string text)

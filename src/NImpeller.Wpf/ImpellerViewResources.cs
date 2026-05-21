@@ -31,15 +31,15 @@ internal sealed unsafe class ImpellerViewResources : IDisposable
         DpiScaleY = dpiScaleY;
     }
 
-    public D3DImage? D3DImage => _d3dImage;
-    public ImpellerTypographyContext? Typography => _host?.Typography;
-    public uint PixelWidth { get; private set; }
-    public uint PixelHeight { get; private set; }
-    public double DpiScaleX { get; private set; }
-    public double DpiScaleY { get; private set; }
-    public bool CanRender => _host != null && _impellerSwapchain != null && _d3dImage != null;
+    internal D3DImage? D3DImage => _d3dImage;
+    internal ImpellerTypographyContext? Typography => _host?.Typography;
+    internal uint PixelWidth { get; private set; }
+    internal uint PixelHeight { get; private set; }
+    internal double DpiScaleX { get; private set; }
+    internal double DpiScaleY { get; private set; }
+    internal bool CanRender => _host != null && _impellerSwapchain != null && _d3dImage != null;
 
-    public static ImpellerViewResources Create(
+    internal static ImpellerViewResources Create(
         ImpellerView owner,
         ImpellerViewSettings settings,
         uint pixelWidth,
@@ -64,7 +64,7 @@ internal sealed unsafe class ImpellerViewResources : IDisposable
         }
     }
 
-    public void Resize(uint pixelWidth, uint pixelHeight)
+    internal void Resize(uint pixelWidth, uint pixelHeight)
     {
         if (_host == null) return;
 
@@ -87,7 +87,7 @@ internal sealed unsafe class ImpellerViewResources : IDisposable
         CreateSurfaceAndSwapchain();
     }
 
-    public void RebuildForDpi(
+    internal void RebuildForDpi(
         double dpiScaleX,
         double dpiScaleY,
         uint pixelWidth,
@@ -102,19 +102,19 @@ internal sealed unsafe class ImpellerViewResources : IDisposable
         Resize(pixelWidth, pixelHeight);
     }
 
-    public void AttachFrontBufferHandler(DependencyPropertyChangedEventHandler handler)
+    internal void AttachFrontBufferHandler(DependencyPropertyChangedEventHandler handler)
     {
         if (_d3dImage != null)
             _d3dImage.IsFrontBufferAvailableChanged += handler;
     }
 
-    public void DetachFrontBufferHandler(DependencyPropertyChangedEventHandler handler)
+    internal void DetachFrontBufferHandler(DependencyPropertyChangedEventHandler handler)
     {
         if (_d3dImage != null)
             _d3dImage.IsFrontBufferAvailableChanged -= handler;
     }
 
-    public void ReattachBackBuffer()
+    internal void ReattachBackBuffer()
     {
         if (_d3dImage == null || _d3dResources == null) return;
         if (!_d3dImage.IsFrontBufferAvailable) return;
@@ -122,7 +122,7 @@ internal sealed unsafe class ImpellerViewResources : IDisposable
         AttachBackBuffer();
     }
 
-    public void DrawDisplayListAndPresent(ImpellerDisplayList displayList)
+    internal void DrawDisplayListAndPresent(ImpellerDisplayList displayList)
     {
         if (_impellerSwapchain == null)
             throw new InvalidOperationException("Impeller swapchain is not available.");
@@ -133,18 +133,18 @@ internal sealed unsafe class ImpellerViewResources : IDisposable
         surface.Present();
     }
 
-    public void AddDirtyRect()
+    internal void AddDirtyRect()
     {
         if (_d3dImage == null) return;
         _d3dImage.AddDirtyRect(new Int32Rect(0, 0, _d3dImage.PixelWidth, _d3dImage.PixelHeight));
     }
 
-    public void LockImage()
+    internal void LockImage()
     {
         _d3dImage?.Lock();
     }
 
-    public void UnlockImage()
+    internal void UnlockImage()
     {
         _d3dImage?.Unlock();
     }

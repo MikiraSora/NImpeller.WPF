@@ -21,8 +21,8 @@ namespace NImpeller.Wpf;
 /// Calling initialize more than once on the same view is invalid. Use
 /// <see cref="ImpellerView.Start()"/> and <see cref="ImpellerView.Stop"/> to
 /// control only the continuous render loop after initialization. To apply locked
-/// or first-initialization-only changes, detach the view, wait for
-/// <c>Unloaded</c>, then re-attach with the new settings.
+/// or first-initialization-only changes, create a new <see cref="ImpellerView"/>
+/// with the desired settings.
 /// </summary>
 public sealed class ImpellerViewSettings
 {
@@ -41,21 +41,20 @@ public sealed class ImpellerViewSettings
 
     /// <summary>
     /// When true, the view's backing texture is allocated in physical pixels
-    /// using the system DPI, so text and one-pixel strokes stay sharp on high-DPI
+    /// using the view's current DPI, so text and one-pixel strokes stay sharp on high-DPI
     /// displays. When false, the texture is allocated in DIPs (logical pixels),
     /// which is cheaper but blurry on displays above 100% DPI.
-    /// <para><b>Lifetime</b>: applied at first initialization. Later changes are
-    /// stored but do not rebuild the existing texture on their own; the new value
-    /// will be observed on the next resize or DPI change. To apply immediately,
-    /// detach and re-attach the view.</para>
+    /// <para><b>Lifetime</b>: read during the view's first initialization. Set it
+    /// before calling <see cref="ImpellerView.InitializeRender(ImpellerViewSettings)"/>
+    /// or <see cref="ImpellerView.Start()"/>. To change it later, create a new
+    /// <see cref="ImpellerView"/> with the desired settings.</para>
     /// </summary>
     public bool UseDeviceDpi { get; init; } = true;
 
     /// <summary>
     /// Override the layout size returned by <c>MeasureOverride</c>. When null
     /// (default), the view fills the available size of its parent container.
-    /// <para><b>Lifetime</b>: read on every <c>MeasureOverride</c>. Call
-    /// <c>InvalidateMeasure</c> on the view to apply a new value sooner.</para>
+    /// <para><b>Lifetime</b>: read whenever WPF measures the view.</para>
     /// </summary>
     public Size? LogicalSizeOverride { get; init; }
 
@@ -64,9 +63,8 @@ public sealed class ImpellerViewSettings
     /// <para><b>Lifetime</b>: process-wide, locked at the very first
     /// initialization in the process because the underlying <c>ImpellerContext</c>
     /// / <c>VkInstance</c> is a singleton shared by every <see cref="ImpellerView"/>.
-    /// Subsequent values are silently ignored. To toggle, the entire process must
-    /// be restarted (or <c>ImpellerSharedHost.Shutdown</c> called before the next
-    /// acquire, which disposes the GPU context and is rarely useful in production).</para>
+    /// Subsequent values are silently ignored. To toggle, restart the process before
+    /// creating the first <see cref="ImpellerView"/>.</para>
     /// </summary>
     public bool EnableValidation { get; init; } = false;
 }

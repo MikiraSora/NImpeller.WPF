@@ -158,10 +158,10 @@ public partial class MainWindow : Window
     {
         // e.Builder       — fresh ImpellerDisplayListBuilder, will be drawn after this handler returns
         // e.Typography    — shared ImpellerTypographyContext (nullable)
-        // e.PixelWidth/Height — physical pixel size of the render target
-        // e.DpiScaleX/Y   — system DPI scale (multiply font sizes / strokes by this for crispness)
+        // e.PixelWidth/Height — backing render-target size in pixels
+        // e.DpiScaleX/Y   — this view's DPI scale (multiply font sizes / strokes by this for crispness)
         // e.DeltaTime     — time since this view's previous frame
-        // e.TotalTime     — wall clock since the view started
+        // e.TotalTime     — elapsed render-loop time for this view
         // e.FrameNumber   — monotonically increasing frame counter
 
         // Background fill
@@ -312,7 +312,7 @@ detection, swapchain creation, or blit failures.
 
 ## How it works (short version)
 
-1. The first `ImpellerView.Start()` or `ImpellerView.InitializeRender(settings)` boots an `ImpellerSharedHost` that loads `vulkan-1.dll`, creates the
+1. The first view initialization requested by `ImpellerView.Start()` or `ImpellerView.InitializeRender(settings)` boots an `ImpellerSharedHost` that loads `vulkan-1.dll`, creates the
    `ImpellerContext` (which internally creates a `VkInstance` + `VkDevice`), and caches everything.
 2. Before Impeller resolves any Vulkan function, our `VkProcInterceptor` is installed as the
    `vkGetInstanceProcAddr` callback Impeller asks for. For nine entry points
@@ -322,13 +322,13 @@ detection, swapchain creation, or blit failures.
    that augments the call.
 3. Each `ImpellerView` creates a per-view `D3DResources` (D3D9Ex shared texture + D3D11 imported handle),
    imports the texture as a `VkImage` on Impeller's device via `VK_KHR_external_memory_win32`, creates a
-   1×1 hidden HWND, derives a `VkSurfaceKHR` from it, and asks Impeller for a swapchain.
+   hidden HWND sized to the view's physical render target, derives a `VkSurfaceKHR` from it, and asks Impeller for a swapchain.
 4. The `vkCreateSwapchainKHR` trampoline appends `TRANSFER_SRC_BIT` to the image usage and binds a
    per-view `BlitContext` (command pool + buffer + fence + target image) to the resulting `VkSwapchainKHR`.
 5. Every frame: `ImpellerSurface.Present()` triggers `vkQueuePresentKHR`. Our trampoline looks up the
    `BlitContext` by swapchain handle, records and submits a `vkCmdBlitImage` from the swapchain image to the
-   D3D-shared `VkImage`, waits on the fence, and then calls the real present (with the wait semaphores
-   stripped) so the swapchain advances.
+   D3D-shared `VkImage`, uses a per-view fence to serialize command-buffer reuse, and then calls the real
+   present (with the wait semaphores stripped) so the swapchain advances.
 6. WPF picks up the freshly written shared texture through `D3DImage.AddDirtyRect` and the view's
    `OnRender` blits it via `DrawingContext.DrawImage`.
 

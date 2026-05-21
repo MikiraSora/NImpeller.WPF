@@ -1,11 +1,12 @@
 namespace NImpeller;
 
+/// <summary>Text decoration options applied to Impeller paragraph text.</summary>
 public partial struct ImpellerTextDecoration
 {
     /// <summary>
     /// Initializes a new instance of the <see cref="ImpellerTextDecoration"/> struct.
     /// </summary>
-    /// <param name="type">The type of decoration (can be combined flags).</param>
+    /// <param name="types">The type of decoration (can be combined flags).</param>
     /// <param name="style">The style of the decoration line.</param>
     /// <param name="color">The color of the decoration.</param>
     /// <param name="thicknessMultiplier">The thickness multiplier of the decoration line.</param>

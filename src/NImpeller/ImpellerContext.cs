@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 
 namespace NImpeller;
 
+/// <summary>Managed owner for an Impeller rendering context.</summary>
 public unsafe partial class ImpellerContext
 {
 
@@ -20,12 +21,18 @@ public unsafe partial class ImpellerContext
         return ((Func<IntPtr, IntPtr, IntPtr>)GCHandle.FromIntPtr(userData).Target!)(vkInstance, proc!);
     }
 
-
-
+    /// <summary>Create a Vulkan-backed Impeller context using a name-based proc-address resolver.</summary>
+    /// <param name="getProcAddress">Callback that resolves Vulkan procedure names for the supplied instance.</param>
+    /// <param name="enableValidation">Whether Vulkan validation should be requested for the context.</param>
+    /// <returns>A new context, or null if native context creation failed.</returns>
     public static ImpellerContext? CreateVulkanNew(Func<IntPtr, string, IntPtr> getProcAddress, bool enableValidation)
         => CreateVulkanNew((IntPtr vkInstance, IntPtr proc) =>
             getProcAddress(vkInstance, Marshal.PtrToStringAnsi(proc)!), enableValidation);
     
+    /// <summary>Create a Vulkan-backed Impeller context using a raw proc-address resolver.</summary>
+    /// <param name="getProcAddress">Callback that resolves Vulkan procedure names from native string pointers.</param>
+    /// <param name="enableValidation">Whether Vulkan validation should be requested for the context.</param>
+    /// <returns>A new context, or null if native context creation failed.</returns>
     public static ImpellerContext? CreateVulkanNew(Func<IntPtr, IntPtr, IntPtr> getProcAddress, bool enableValidation)
     {
         var handle = GCHandle.Alloc(getProcAddress);
@@ -40,9 +47,15 @@ public unsafe partial class ImpellerContext
         return res != null! ? new ImpellerContext(res) : null;
     }
 
+    /// <summary>Create an OpenGL ES-backed Impeller context using a name-based proc-address resolver.</summary>
+    /// <param name="getProcAddress">Callback that resolves OpenGL ES procedure names.</param>
+    /// <returns>A new context, or null if native context creation failed.</returns>
     public static ImpellerContext? CreateOpenGLESNew(Func<string, IntPtr> getProcAddress)
         => CreateOpenGLESNew((IntPtr name) => getProcAddress(Marshal.PtrToStringAnsi(name)!));
     
+    /// <summary>Create an OpenGL ES-backed Impeller context using a raw proc-address resolver.</summary>
+    /// <param name="getProcAddress">Callback that resolves OpenGL ES procedure names from native string pointers.</param>
+    /// <returns>A new context, or null if native context creation failed.</returns>
     public static ImpellerContext? CreateOpenGLESNew(Func<IntPtr, IntPtr> getProcAddress)
     {
         var handle = GCHandle.Alloc(getProcAddress);
@@ -53,12 +66,16 @@ public unsafe partial class ImpellerContext
         return res != null! ? new ImpellerContext(res) : null;
     }
 
+    /// <summary>Create a Metal-backed Impeller context on platforms where Metal is available.</summary>
+    /// <returns>A new context, or null if native context creation failed.</returns>
     public static ImpellerContext? CreateMetalNew()
     {
         var res = UnsafeNativeMethods.ImpellerContextCreateMetalNew(UnsafeNativeMethods.ImpellerVersion);
         return res != null! ? new ImpellerContext(res) : null;
     }
 
+    /// <summary>Get Vulkan handles and queue information for a Vulkan-backed context.</summary>
+    /// <returns>Vulkan context information, or null if the current context is not Vulkan-backed.</returns>
     public ImpellerContextVulkanInfo? GetVulkanInfo()
     {
         ImpellerContextVulkanInfo info;

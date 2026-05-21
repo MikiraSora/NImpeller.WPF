@@ -13,6 +13,7 @@ namespace NImpeller.Wpf;
 /// </summary>
 public sealed class ImpellerRenderEventArgs : EventArgs
 {
+    /// <summary>Create render event data for a single Impeller frame.</summary>
     public ImpellerRenderEventArgs(
         ImpellerView source,
         ImpellerDisplayListBuilder builder,
@@ -46,20 +47,20 @@ public sealed class ImpellerRenderEventArgs : EventArgs
     /// <summary>Shared typography context (null if Impeller failed to create one).</summary>
     public ImpellerTypographyContext? Typography { get; }
 
-    /// <summary>Physical pixel width of the render target.</summary>
+    /// <summary>Backing render-target width in pixels.</summary>
     public int PixelWidth { get; }
 
-    /// <summary>Physical pixel height of the render target.</summary>
+    /// <summary>Backing render-target height in pixels.</summary>
     public int PixelHeight { get; }
 
     /// <summary>
-    /// Horizontal system DPI scale (1.0 at 96 DPI, 1.5 at 144 DPI, etc.).
+    /// Horizontal DPI scale used by the view (1.0 at 96 DPI, 1.5 at 144 DPI, etc.).
     /// Multiply font sizes / 1-px strokes by this for crispness.
     /// </summary>
     public float DpiScaleX { get; }
 
     /// <summary>
-    /// Vertical system DPI scale. Equal to <see cref="DpiScaleX"/> on almost
+    /// Vertical DPI scale used by the view. Equal to <see cref="DpiScaleX"/> on almost
     /// all setups, but separate on virtual / projected displays with
     /// non-square DPI.
     /// </summary>
@@ -68,7 +69,7 @@ public sealed class ImpellerRenderEventArgs : EventArgs
     /// <summary>Time since the previous frame on this view.</summary>
     public TimeSpan DeltaTime { get; }
 
-    /// <summary>Total time since the view started rendering.</summary>
+    /// <summary>Elapsed render-loop time for this view.</summary>
     public TimeSpan TotalTime { get; }
 
     /// <summary>Monotonically increasing frame counter (starts at 1 for the first frame).</summary>
