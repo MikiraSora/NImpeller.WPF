@@ -76,7 +76,7 @@ internal sealed class HiddenVulkanWindow : IDisposable
     public IntPtr Hwnd => _hwnd;
     public IntPtr HInstance => _hinstance;
 
-    public void Create(int width, int height)
+    public void Create(int width, int height, string? hostWindowTitle)
     {
         if (_hwnd != IntPtr.Zero) return;
         _hinstance = GetModuleHandleW(null);
@@ -114,8 +114,12 @@ internal sealed class HiddenVulkanWindow : IDisposable
             }
         }
 
+        var title = string.IsNullOrWhiteSpace(hostWindowTitle)
+            ? $"NImpellerWpfHiddenVk pid={Environment.ProcessId}"
+            : $"NImpellerWpfHiddenVk host=\"{hostWindowTitle}\" pid={Environment.ProcessId}";
+
         _hwnd = CreateWindowExW(
-            WS_EX_TOOLWINDOW, ClassName, "NImpellerWpfHiddenVk", WS_POPUP,
+            WS_EX_TOOLWINDOW, ClassName, title, WS_POPUP,
             -32000, -32000, Math.Max(1, width), Math.Max(1, height),
             IntPtr.Zero, IntPtr.Zero, _hinstance, IntPtr.Zero);
 

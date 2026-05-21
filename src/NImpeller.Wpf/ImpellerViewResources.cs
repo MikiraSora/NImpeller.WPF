@@ -21,6 +21,7 @@ internal sealed unsafe class ImpellerViewResources : IDisposable
     private ulong _swapchainHandle;
     private BlitContext? _blitContext;
     private D3DImage? _d3dImage;
+    private string? _hostWindowTitle;
 
     private ImpellerViewResources(ImpellerViewSettings settings, uint pixelWidth, uint pixelHeight, double dpiScaleX, double dpiScaleY)
     {
@@ -136,8 +137,7 @@ internal sealed unsafe class ImpellerViewResources : IDisposable
 
     internal void AddDirtyRect()
     {
-        if (_d3dImage == null) return;
-        _d3dImage.AddDirtyRect(new Int32Rect(0, 0, _d3dImage.PixelWidth, _d3dImage.PixelHeight));
+        _d3dImage?.AddDirtyRect(new Int32Rect(0, 0, _d3dImage.PixelWidth, _d3dImage.PixelHeight));
     }
 
     internal void LockImage()
@@ -182,6 +182,7 @@ internal sealed unsafe class ImpellerViewResources : IDisposable
                 "ImpellerView must be hosted inside a Window before InitializeRender() is called. " +
                 "If the view lives in a Popup, custom PresentationSource, or has not yet " +
                 "been added to a Window's visual tree, defer InitializeRender() until OnLoaded.");
+        _hostWindowTitle = hostWindow.Title;
 
         _d3dResources = new D3DResources();
         _d3dResources.Initialize(new WindowInteropHelper(hostWindow).Handle);
@@ -214,7 +215,7 @@ internal sealed unsafe class ImpellerViewResources : IDisposable
         if (_hiddenWindow == null)
         {
             _hiddenWindow = new HiddenVulkanWindow();
-            _hiddenWindow.Create((int)PixelWidth, (int)PixelHeight);
+            _hiddenWindow.Create((int)PixelWidth, (int)PixelHeight, _hostWindowTitle);
         }
         else
         {
